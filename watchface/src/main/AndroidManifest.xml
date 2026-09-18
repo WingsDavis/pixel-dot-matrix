@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature android:name="android.hardware.type.watch" />
+
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <application
+        android:label="@string/app_name"
+        android:hasCode="false"
+        tools:ignore="MissingApplicationIcon">
+
+        <property
+            android:name="com.google.wear.watchface.format.version"
+            android:value="2" />
+
+    </application>
+
+</manifest>

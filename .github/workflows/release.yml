@@ -1,0 +1,35 @@
+name: GitHub Preview Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-36.1"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Test and build preview APKs
+        run: ./gradlew testDebugUnitTest :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
+      - name: Stage release files
+        run: |
+          mkdir release
+          cp app/build/outputs/apk/debug/app-debug.apk release/pixel-dot-matrix-phone.apk
+          cp wear/build/outputs/apk/debug/wear-debug.apk release/pixel-dot-matrix-wear.apk
+          cp watchface/build/outputs/apk/debug/watchface-debug.apk release/pixel-dot-matrix-watchface.apk
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/*.apk --generate-notes --verify-tag --prerelease

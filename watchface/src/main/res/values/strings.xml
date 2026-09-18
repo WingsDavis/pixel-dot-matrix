@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Pixel Dot Matrix</string>
+    <string name="hour_color_label">Hour</string>
+    <string name="minute_color_label">Minute</string>
+    <string name="second_color_label">Second</string>
+    <string name="color_cyan_label">Cyan</string>
+    <string name="color_orange_label">Orange</string>
+    <string name="color_blue_label">Blue</string>
+    <string name="color_green_label">Green</string>
+    <string name="color_yellow_label">Yellow</string>
+    <string name="color_red_label">Red</string>
+    <string name="color_white_label">White</string>
+    <string name="color_silver_label">Silver</string>
+    <string name="color_graphite_label">Graphite</string>
+    <string name="color_amber_label">Amber</string>
+    <string name="color_coral_label">Coral</string>
+    <string name="color_sky_label">Sky</string>
+    <string name="color_indigo_label">Indigo</string>
+    <string name="color_violet_label">Violet</string>
+    <string name="color_lime_label">Lime</string>
+    <string name="color_mint_label">Mint</string>
+    <string name="color_teal_label">Teal</string>
+    <string name="color_magenta_label">Magenta</string>
+    <string name="color_terminal_label">Terminal Green</string>
+    <string name="color_ice_label">Ice Blue</string>
+    <string name="flavor_original_label">Original</string>
+    <string name="flavor_cyan_label">Cyan</string>
+    <string name="flavor_focus_label">Focus</string>
+    <string name="flavor_high_contrast_label">High Contrast</string>
+</resources>

@@ -1,0 +1,582 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<WatchFace width="450" height="450" clipShape="CIRCLE">
+
+    <Metadata key="CLOCK_TYPE" value="DIGITAL" />
+
+    <UserConfigurations>
+        <ColorConfiguration id="hour_color"
+            displayName="hour_color_label"
+            defaultValue="orange">
+            <ColorOption id="cyan" displayName="color_cyan_label" colors="#00e5ff" />
+            <ColorOption id="orange" displayName="color_orange_label" colors="#ff9800" />
+            <ColorOption id="blue" displayName="color_blue_label" colors="#42a5f5" />
+            <ColorOption id="green" displayName="color_green_label" colors="#81c784" />
+            <ColorOption id="yellow" displayName="color_yellow_label" colors="#ffca28" />
+            <ColorOption id="red" displayName="color_red_label" colors="#ef5350" />
+            <ColorOption id="white" displayName="color_white_label" colors="#ffffff" />
+            <ColorOption id="silver" displayName="color_silver_label" colors="#c7ccd1" />
+            <ColorOption id="graphite" displayName="color_graphite_label" colors="#73787c" />
+            <ColorOption id="amber" displayName="color_amber_label" colors="#ffb300" />
+            <ColorOption id="coral" displayName="color_coral_label" colors="#ff6f61" />
+            <ColorOption id="sky" displayName="color_sky_label" colors="#29b6f6" />
+            <ColorOption id="indigo" displayName="color_indigo_label" colors="#5c6bc0" />
+            <ColorOption id="violet" displayName="color_violet_label" colors="#ab47bc" />
+            <ColorOption id="lime" displayName="color_lime_label" colors="#c0ca33" />
+            <ColorOption id="mint" displayName="color_mint_label" colors="#66d9b8" />
+            <ColorOption id="teal" displayName="color_teal_label" colors="#26a69a" />
+            <ColorOption id="magenta" displayName="color_magenta_label" colors="#ec407a" />
+            <ColorOption id="terminal" displayName="color_terminal_label" colors="#39ff14" />
+            <ColorOption id="ice" displayName="color_ice_label" colors="#80deea" />
+        </ColorConfiguration>
+
+        <ColorConfiguration id="second_color"
+            displayName="second_color_label"
+            defaultValue="orange">
+            <ColorOption id="cyan" displayName="color_cyan_label" colors="#00e5ff" />
+            <ColorOption id="orange" displayName="color_orange_label" colors="#ff9800" />
+            <ColorOption id="blue" displayName="color_blue_label" colors="#42a5f5" />
+            <ColorOption id="green" displayName="color_green_label" colors="#81c784" />
+            <ColorOption id="yellow" displayName="color_yellow_label" colors="#ffca28" />
+            <ColorOption id="red" displayName="color_red_label" colors="#ef5350" />
+            <ColorOption id="white" displayName="color_white_label" colors="#ffffff" />
+            <ColorOption id="silver" displayName="color_silver_label" colors="#c7ccd1" />
+            <ColorOption id="graphite" displayName="color_graphite_label" colors="#73787c" />
+            <ColorOption id="amber" displayName="color_amber_label" colors="#ffb300" />
+            <ColorOption id="coral" displayName="color_coral_label" colors="#ff6f61" />
+            <ColorOption id="sky" displayName="color_sky_label" colors="#29b6f6" />
+            <ColorOption id="indigo" displayName="color_indigo_label" colors="#5c6bc0" />
+            <ColorOption id="violet" displayName="color_violet_label" colors="#ab47bc" />
+            <ColorOption id="lime" displayName="color_lime_label" colors="#c0ca33" />
+            <ColorOption id="mint" displayName="color_mint_label" colors="#66d9b8" />
+            <ColorOption id="teal" displayName="color_teal_label" colors="#26a69a" />
+            <ColorOption id="magenta" displayName="color_magenta_label" colors="#ec407a" />
+            <ColorOption id="terminal" displayName="color_terminal_label" colors="#39ff14" />
+            <ColorOption id="ice" displayName="color_ice_label" colors="#80deea" />
+        </ColorConfiguration>
+
+        <ColorConfiguration id="minute_color"
+            displayName="minute_color_label"
+            defaultValue="white">
+            <ColorOption id="cyan" displayName="color_cyan_label" colors="#00e5ff" />
+            <ColorOption id="orange" displayName="color_orange_label" colors="#ff9800" />
+            <ColorOption id="blue" displayName="color_blue_label" colors="#42a5f5" />
+            <ColorOption id="green" displayName="color_green_label" colors="#81c784" />
+            <ColorOption id="yellow" displayName="color_yellow_label" colors="#ffca28" />
+            <ColorOption id="red" displayName="color_red_label" colors="#ef5350" />
+            <ColorOption id="white" displayName="color_white_label" colors="#ffffff" />
+            <ColorOption id="silver" displayName="color_silver_label" colors="#c7ccd1" />
+            <ColorOption id="graphite" displayName="color_graphite_label" colors="#73787c" />
+            <ColorOption id="amber" displayName="color_amber_label" colors="#ffb300" />
+            <ColorOption id="coral" displayName="color_coral_label" colors="#ff6f61" />
+            <ColorOption id="sky" displayName="color_sky_label" colors="#29b6f6" />
+            <ColorOption id="indigo" displayName="color_indigo_label" colors="#5c6bc0" />
+            <ColorOption id="violet" displayName="color_violet_label" colors="#ab47bc" />
+            <ColorOption id="lime" displayName="color_lime_label" colors="#c0ca33" />
+            <ColorOption id="mint" displayName="color_mint_label" colors="#66d9b8" />
+            <ColorOption id="teal" displayName="color_teal_label" colors="#26a69a" />
+            <ColorOption id="magenta" displayName="color_magenta_label" colors="#ec407a" />
+            <ColorOption id="terminal" displayName="color_terminal_label" colors="#39ff14" />
+            <ColorOption id="ice" displayName="color_ice_label" colors="#80deea" />
+        </ColorConfiguration>
+
+        <Flavors defaultValue="original_flavor">
+            <Flavor id="original_flavor"
+                displayName="flavor_original_label"
+                screenReaderText="flavor_original_label">
+                <Configuration id="hour_color" optionId="orange" />
+                <Configuration id="minute_color" optionId="white" />
+                <Configuration id="second_color" optionId="orange" />
+            </Flavor>
+            <Flavor id="cyan_flavor"
+                displayName="flavor_cyan_label"
+                screenReaderText="flavor_cyan_label">
+                <Configuration id="hour_color" optionId="cyan" />
+                <Configuration id="minute_color" optionId="white" />
+                <Configuration id="second_color" optionId="cyan" />
+            </Flavor>
+            <Flavor id="focus_flavor"
+                displayName="flavor_focus_label"
+                screenReaderText="flavor_focus_label">
+                <Configuration id="hour_color" optionId="blue" />
+                <Configuration id="minute_color" optionId="white" />
+                <Configuration id="second_color" optionId="blue" />
+            </Flavor>
+            <Flavor id="high_contrast_flavor"
+                displayName="flavor_high_contrast_label"
+                screenReaderText="flavor_high_contrast_label">
+                <Configuration id="hour_color" optionId="white" />
+                <Configuration id="minute_color" optionId="white" />
+                <Configuration id="second_color" optionId="orange" />
+            </Flavor>
+        </Flavors>
+    </UserConfigurations>
+
+    <BitmapFonts>
+        <BitmapFont name="dot_matrix_lit">
+            <Character name="0" resource="digit_0" width="100" height="140" />
+            <Character name="1" resource="digit_1" width="100" height="140" />
+            <Character name="2" resource="digit_2" width="100" height="140" />
+            <Character name="3" resource="digit_3" width="100" height="140" />
+            <Character name="4" resource="digit_4" width="100" height="140" />
+            <Character name="5" resource="digit_5" width="100" height="140" />
+            <Character name="6" resource="digit_6" width="100" height="140" />
+            <Character name="7" resource="digit_7" width="100" height="140" />
+            <Character name="8" resource="digit_8" width="100" height="140" />
+            <Character name="9" resource="digit_9" width="100" height="140" />
+            <Character name=":" resource="digit_colon" width="40" height="140" />
+        </BitmapFont>
+
+        <BitmapFont name="dot_matrix_unlit">
+            <Character name="8" resource="bg_digit" width="100" height="140" />
+            <Character name=":" resource="bg_colon" width="40" height="140" />
+        </BitmapFont>
+    </BitmapFonts>
+
+    <Scene backgroundColor="#ff000000">
+
+        <!-- Right Side: Stacked Time (Bold NDot, No Background) - Background Layer -->
+        <Group name="TimeGroup" x="245" y="100" width="205" height="250">
+            <Variant mode="AMBIENT" target="x" value="145" />
+            <!-- Force TimeGroup to always display in Ambient mode -->
+            <Variant mode="AMBIENT" target="alpha" value="255" />
+            <!-- Hide when active session exists in interactive mode -->
+            <Transform target="alpha" value="[COMPLICATION.103.RANGED_VALUE_VALUE] &gt;= 0 ? 0 : 255" />
+
+            <!-- Active Time (Solid) -->
+            <PartText x="0" y="0" width="160" height="125">
+                <Variant mode="AMBIENT" target="alpha" value="0" />
+                <Text align="CENTER">
+                    <Font family="ndot" size="110" color="[CONFIGURATION.hour_color]">
+                        <Template>%s<Parameter expression="[HOUR_1_12_Z]" /></Template>
+                    </Font>
+                </Text>
+            </PartText>
+            <PartText x="0" y="125" width="160" height="125">
+                <Variant mode="AMBIENT" target="alpha" value="0" />
+                <Text align="CENTER">
+                    <Font family="ndot" size="110" color="[CONFIGURATION.minute_color]">
+                        <Template>%s<Parameter expression="[MINUTE_Z]" /></Template>
+                    </Font>
+                </Text>
+            </PartText>
+
+            <!-- Ambient Time (Dim Solid Color) -->
+            <PartText x="0" y="0" width="160" height="125" alpha="0">
+                <Variant mode="AMBIENT" target="alpha" value="255" />
+                <Text align="CENTER">
+                    <Font family="ndot" size="110" color="[CONFIGURATION.hour_color]">
+                        <Template>%s<Parameter expression="[HOUR_1_12_Z]" /></Template>
+                    </Font>
+                </Text>
+            </PartText>
+            <PartText x="0" y="125" width="160" height="125" alpha="0">
+                <Variant mode="AMBIENT" target="alpha" value="255" />
+                <Text align="CENTER">
+                    <Font family="ndot" size="110" color="[CONFIGURATION.minute_color]">
+                        <Template>%s<Parameter expression="[MINUTE_Z]" /></Template>
+                    </Font>
+                </Text>
+            </PartText>
+        </Group>
+
+        <!-- User-selected logo, supplied by the Wear app with ws_logo as fallback. -->
+        <ComplicationSlot slotId="105" x="185" y="10" width="80" height="80"
+            supportedTypes="SMALL_IMAGE">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
+
+            <DefaultProviderPolicy
+                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.LogoComplicationService"
+                primaryProviderType="SMALL_IMAGE"
+                defaultSystemProvider="EMPTY" />
+
+            <Complication type="SMALL_IMAGE">
+                <PartImage x="0" y="0" width="80" height="80">
+                    <Image resource="[COMPLICATION.SMALL_IMAGE]" />
+                </PartImage>
+            </Complication>
+        </ComplicationSlot>
+
+        <!-- Keep panic launch behavior independent of the selected image provider. -->
+        <Group name="LogoTapTarget" x="185" y="10" width="80" height="80">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
+            <PartDraw x="0" y="0" width="80" height="80">
+                <Rectangle x="0" y="0" width="80" height="80">
+                    <Fill color="#00000000" />
+                </Rectangle>
+                <Launch target="panic://trigger" />
+            </PartDraw>
+        </Group>
+
+        <!-- Pomodoro Progress Complication (Left Edge) -->
+        <ComplicationSlot slotId="103" x="0" y="0" width="450" height="450"
+            supportedTypes="RANGED_VALUE">
+
+            <DefaultProviderPolicy
+                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.PomodoroProgressComplicationService"
+                primaryProviderType="RANGED_VALUE"
+                defaultSystemProvider="EMPTY" />
+
+            <Complication type="RANGED_VALUE">
+                <!-- Group handles ambient mode hiding -->
+                <Group x="0" y="0" width="450" height="450" name="PomodoroProgressArcs">
+                    <Variant mode="AMBIENT" target="alpha" value="0" />
+
+                    <!-- Inner group handles hiding when idle -->
+                    <Group x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_VALUE] &gt;= 0 ? 255 : 0" />
+                    <!-- ════════════════════════════════════════════════════════ -->
+                    <!-- PROGRESS ARCS (Symmetric dynamic coloring per state)       -->
+                    <!-- ════════════════════════════════════════════════════════ -->
+
+                    <!-- BLUE ARC — Focus Mode (max > 1000s) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
+                        <!-- Background Arc -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#11ffffff" thickness="6" cap="ROUND" />
+                        </Arc>
+                        <!-- Filled Arc for Pomodoro Progress -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#ff42a5f5" thickness="6" cap="ROUND" />
+                            <Transform target="endAngle" value="210 + (120 * ([COMPLICATION.RANGED_VALUE_VALUE] / ([COMPLICATION.RANGED_VALUE_MAX] + 0.001)))" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- GREEN ARC — Long Break Mode (500 < max < 1200) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
+                        <!-- Background Arc -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#11ffffff" thickness="6" cap="ROUND" />
+                        </Arc>
+                        <!-- Filled Arc for Pomodoro Progress -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#ff81c784" thickness="6" cap="ROUND" />
+                            <Transform target="endAngle" value="210 + (120 * ([COMPLICATION.RANGED_VALUE_VALUE] / ([COMPLICATION.RANGED_VALUE_MAX] + 0.001)))" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- YELLOW ARC — Short Break Mode (100 < max < 500) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
+                        <!-- Background Arc -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#11ffffff" thickness="6" cap="ROUND" />
+                        </Arc>
+                        <!-- Filled Arc for Pomodoro Progress -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#ffffca28" thickness="6" cap="ROUND" />
+                            <Transform target="endAngle" value="210 + (120 * ([COMPLICATION.RANGED_VALUE_VALUE] / ([COMPLICATION.RANGED_VALUE_MAX] + 0.001)))" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- RED ARC — Panic Mode (max < 100) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
+                        <!-- Background Arc -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#11ffffff" thickness="6" cap="ROUND" />
+                        </Arc>
+                        <!-- Filled Arc for Pomodoro Progress -->
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="210" endAngle="330">
+                            <Stroke color="#ffef5350" thickness="6" cap="ROUND" />
+                            <Transform target="endAngle" value="210 + (120 * ([COMPLICATION.RANGED_VALUE_VALUE] / ([COMPLICATION.RANGED_VALUE_MAX] + 0.001)))" />
+                        </Arc>
+                    </PartDraw>
+
+
+                    <!-- ════════════════════════════════════════════════════════ -->
+                    <!-- SECONDS ARCS (Color overlays matching state)             -->
+                    <!-- ════════════════════════════════════════════════════════ -->
+
+                    <!-- FOCUS SECONDS (Blue) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                            <Stroke color="#ff42a5f5" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                            <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- LONG BREAK SECONDS (Green) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                            <Stroke color="#ff81c784" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                            <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- SHORT BREAK SECONDS (Yellow) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                            <Stroke color="#ffffca28" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                            <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
+                        </Arc>
+                    </PartDraw>
+
+                    <!-- PANIC SECONDS (Red) -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
+                        <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                            <Stroke color="#ffef5350" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                            <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
+                        </Arc>
+                    </PartDraw>
+
+
+                    <!-- SESSION TEXT: vertical layout (slot 102: x=45, y=110, width=185, height=200) -->
+                    <Group x="45" y="110" width="185" height="200">
+
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <!-- 1. FOCUS STATE (Gray Vertical Session Text)             -->
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <Group x="0" y="0" width="185" height="200">
+                            <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
+
+                            <!-- Session Label (Vertical, Gray) -->
+                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                                <PartText x="0" y="0" width="195" height="200">
+                                    <Text align="CENTER">
+                                        <Font family="ndot" size="26" color="#ff888888">
+                                            <Template>FOCUS</Template>
+                                        </Font>
+                                    </Text>
+                                </PartText>
+                            </Group>
+                        </Group>
+
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <!-- 2. LONG BREAK STATE (Gray Vertical Text)                -->
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <Group x="0" y="0" width="185" height="200">
+                            <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
+
+                            <!-- Session Label (Vertical, Gray) -->
+                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                                <PartText x="0" y="0" width="195" height="200">
+                                    <Text align="CENTER">
+                                        <Font family="ndot" size="26" color="#ff888888">
+                                            <Template>LONG BREAK</Template>
+                                        </Font>
+                                    </Text>
+                                </PartText>
+                            </Group>
+                        </Group>
+
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <!-- 3. SHORT BREAK STATE (Gray Vertical Text)               -->
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <Group x="0" y="0" width="185" height="200">
+                            <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
+
+                            <!-- Session Label (Vertical, Gray) -->
+                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                                <PartText x="0" y="0" width="195" height="200">
+                                    <Text align="CENTER">
+                                        <Font family="ndot" size="26" color="#ff888888">
+                                            <Template>SHORT BREAK</Template>
+                                        </Font>
+                                    </Text>
+                                </PartText>
+                            </Group>
+                        </Group>
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <!-- 4. PANIC STATE (Gray Vertical Text)                     -->
+                        <!-- ════════════════════════════════════════════════════════ -->
+                        <Group x="0" y="0" width="185" height="200">
+                            <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
+
+                            <!-- Session Label (Vertical, Gray) -->
+                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                                <PartText x="0" y="0" width="195" height="200">
+                                    <Text align="CENTER">
+                                        <Font family="ndot" size="26" color="#ff888888">
+                                            <Template>PANIC!</Template>
+                                        </Font>
+                                    </Text>
+                                </PartText>
+                            </Group>
+                        </Group>
+
+                    </Group>
+
+                    <!-- Black mask to cover standard TimeGroup when session is active -->
+                    <PartDraw x="0" y="0" width="450" height="450">
+                        <Variant mode="AMBIENT" target="alpha" value="255" />
+                        <Rectangle x="240" y="90" width="190" height="260">
+                            <Variant mode="AMBIENT" target="x" value="140" />
+                            <Fill color="#ff000000" />
+                        </Rectangle>
+                    </PartDraw>
+                    </Group>
+                </Group>
+
+                <!-- Right Side: Massive Session Timer (replaces Time when active in Interactive Mode) -->
+                <Group name="SessionTimerGroup" x="245" y="100" width="205" height="250">
+                    <Variant mode="AMBIENT" target="x" value="145" />
+                    <!-- Force SessionTimer to hide in Ambient mode to preserve battery -->
+                    <Variant mode="AMBIENT" target="alpha" value="0" />
+                    <!-- Show only when a session is active in interactive mode -->
+                    <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_VALUE] &gt;= 0 ? 255 : 0" />
+
+                        <!-- 1. FOCUS STATE (Blue) -->
+                        <Group x="0" y="0" width="160" height="250">
+                            <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
+                            <PartText x="0" y="0" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ff42a5f5">
+                                        <Variant mode="AMBIENT" target="color" value="#ff20527a" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                            <PartText x="0" y="125" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ff42a5f5">
+                                        <Variant mode="AMBIENT" target="color" value="#ff20527a" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                        </Group>
+
+                        <!-- 2. LONG BREAK STATE (Green) -->
+                        <Group x="0" y="0" width="160" height="250">
+                            <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
+                            <PartText x="0" y="0" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ff81c784">
+                                        <Variant mode="AMBIENT" target="color" value="#ff406342" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                            <PartText x="0" y="125" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ff81c784">
+                                        <Variant mode="AMBIENT" target="color" value="#ff406342" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                        </Group>
+
+                        <!-- 3. SHORT BREAK STATE (Yellow) -->
+                        <Group x="0" y="0" width="160" height="250">
+                            <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
+                            <PartText x="0" y="0" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ffffca28">
+                                        <Variant mode="AMBIENT" target="color" value="#ff806514" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                            <PartText x="0" y="125" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ffffca28">
+                                        <Variant mode="AMBIENT" target="color" value="#ff806514" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                        </Group>
+
+                        <!-- 4. PANIC STATE (Red) -->
+                        <Group x="0" y="0" width="160" height="250">
+                            <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
+                            <PartText x="0" y="0" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ffef5350">
+                                        <Variant mode="AMBIENT" target="color" value="#ff782928" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                            <PartText x="0" y="125" width="160" height="125">
+                                <Text align="CENTER">
+                                    <Font family="ndot" size="110" color="#ffef5350">
+                                        <Variant mode="AMBIENT" target="color" value="#ff782928" />
+                                        <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
+                                    </Font>
+                                </Text>
+                            </PartText>
+                        </Group>
+                    </Group>
+            </Complication>
+        </ComplicationSlot>
+
+        <!-- Bottom Right: Day and Date Complication (slot 104) -->
+        <ComplicationSlot slotId="104" x="235" y="375" width="160" height="50"
+            supportedTypes="SHORT_TEXT">
+
+            <DefaultProviderPolicy
+                defaultSystemProvider="DAY_AND_DATE"
+                defaultSystemProviderType="SHORT_TEXT" />
+
+            <Complication type="SHORT_TEXT">
+                <PartText x="0" y="0" width="160" height="50">
+                    <Text align="CENTER">
+                        <Font family="ndot" size="28" color="#ffffffff">
+                            <Template>%s<Parameter expression="[COMPLICATION.TEXT]" /></Template>
+                        </Font>
+                    </Text>
+                </PartText>
+            </Complication>
+        </ComplicationSlot>
+
+        <!-- Left Side: Custom Text Complication (slot 102) -->
+        <ComplicationSlot slotId="102" x="45" y="110" width="185" height="200"
+            supportedTypes="SHORT_TEXT LONG_TEXT EMPTY">
+
+            <DefaultProviderPolicy
+                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.CustomTextComplicationService"
+                primaryProviderType="SHORT_TEXT"
+                defaultSystemProvider="EMPTY" />
+
+            <Complication type="SHORT_TEXT">
+                <PartText x="0" y="0" width="185" height="200">
+                    <Variant mode="AMBIENT" target="alpha" value="0" />
+                    <Text align="START" overflow="ELLIPSIS" maxLines="5">
+                        <Font family="twinkle_star" size="32" color="#ffffffff">
+                            <Template>%s<Parameter expression="[COMPLICATION.TEXT]" /></Template>
+                        </Font>
+                    </Text>
+                </PartText>
+            </Complication>
+
+            <Complication type="LONG_TEXT">
+                <PartText x="0" y="0" width="185" height="200">
+                    <Variant mode="AMBIENT" target="alpha" value="0" />
+                    <Text align="START" overflow="ELLIPSIS" maxLines="5">
+                        <Font family="twinkle_star" size="32" color="#ffffffff">
+                            <Template>%s<Parameter expression="[COMPLICATION.TEXT]" /></Template>
+                        </Font>
+                    </Text>
+                </PartText>
+            </Complication>
+        </ComplicationSlot>
+
+
+        <!-- Seconds Arc (Right Edge) -->
+        <Group name="SecondsArcGroup" x="0" y="0" width="450" height="450">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
+            <PartDraw x="0" y="0" width="450" height="450">
+                <!-- Background track -->
+                <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                    <Stroke color="#33ffffff" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                </Arc>
+                <!-- Filled track syncing with seconds -->
+                <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
+                    <Variant mode="AMBIENT" target="alpha" value="0" />
+                    <Stroke color="[CONFIGURATION.second_color]" thickness="4" cap="ROUND" dashIntervals="4 8" />
+                    <!-- Bind endAngle to seconds. Total arc is 90 degrees. -->
+                    <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
+                </Arc>
+            </PartDraw>
+        </Group>
+
+    </Scene>
+</WatchFace>

@@ -1,0 +1,264 @@
+package com.example.wear
+
+import android.content.Intent
+import android.os.SystemClock
+import android.util.Log
+import com.google.android.gms.wearable.DataEvent
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.Asset
+import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.PutDataMapRequest
+import com.google.android.gms.wearable.Wearable
+import com.google.android.gms.wearable.WearableListenerService
+
+class WearSyncService : WearableListenerService() {
+
+    private var lastPanicLaunchElapsed = 0L
+    private var lastFrustrationLaunchElapsed = 0L
+
+    override fun onDataChanged(dataEvents: DataEventBuffer) {
+        super.onDataChanged(dataEvents)
+        for (event in dataEvents) {
+            if (event.type == DataEvent.TYPE_CHANGED) {
+                val item = event.dataItem
+                if (item.uri.path == "/pomodoro/watchface_style") {
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    val styleId = dataMap.getString("style_id")
+                    if (styleId != null) {
+                        Log.d(TAG, "Received new watch face style: $styleId")
+                        val prefs = getSharedPreferences("watchface_prefs", MODE_PRIVATE)
+                        prefs.edit().putString("style_id", styleId).apply()
+                    }
+                } else if (item.uri.path == "/pomodoro/state") {
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    val state = dataMap.getString("state") ?: "FOCUS"
+                    val secondsRemaining = dataMap.getInt("seconds_remaining")
+                    val isRunning = dataMap.getBoolean("is_running")
+                    val timerRevision = dataMap.getLong("timer_revision", -1L)
+
+                    val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
+                    prefs.edit()
+                        .putString("state", state)
+                        .putInt("seconds_remaining", secondsRemaining)
+                        .putBoolean("is_running", isRunning)
+                        .putLong("timer_revision", timerRevision)
+                        .apply()
+
+                    // Request complication update for both progress and custom text
+                    val componentName = android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)
+                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+                        .create(applicationContext, componentName)
+                        .requestUpdateAll()
+
+                    val customComponentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
+                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+                        .create(applicationContext, customComponentName)
+                        .requestUpdateAll()
+                } else if (
+                    item.uri.path == PATH_WATCHFACE_CONFIG_LEGACY ||
+                    item.uri.path == PATH_WATCHFACE_CONFIG_V2
+                ) {
+                    applyWatchFaceConfig(DataMapItem.fromDataItem(item).dataMap)
+                } else if (item.uri.path == PATH_WATCHFACE_LOGO_V1) {
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    if (dataMap.getBoolean(KEY_RESET_LOGO, false)) {
+                        deleteFile(LOGO_FILENAME)
+                        requestLogoComplicationUpdate()
+                    } else {
+                        dataMap.getAsset(KEY_LOGO_ASSET)?.let(::storeLogoAsset)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        super.onMessageReceived(messageEvent)
+        Log.d(TAG, "Watch background listener received message path: ${messageEvent.path}")
+
+        when (messageEvent.path) {
+            "/pomodoro/custom_text" -> {
+                val customText = String(messageEvent.data)
+                Log.d(TAG, "Received custom text via message: $customText")
+                val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
+                prefs.edit().putString("custom_text", customText).apply()
+
+                // Request complication update
+                val componentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
+                androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+                    .create(applicationContext, componentName)
+                    .requestUpdateAll()
+            }
+            "/panic/trigger" -> {
+                if (shouldSkipLaunch(lastPanicLaunchElapsed)) {
+                    Log.d(TAG, "Skipping duplicate panic activity launch.")
+                    return
+                }
+                lastPanicLaunchElapsed = SystemClock.elapsedRealtime()
+
+                // Launch MainActivity directly to turn on escalating haptic loop and show step-tracker UI
+                try {
+                    val intent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra("FORCE_PANIC_UI", true)
+                    }
+                    startActivity(intent)
+                    Log.d(TAG, "Successfully started Wear MainActivity to trigger active intervention.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to automatically launch watch activity from background listener", e)
+                }
+            }
+            "/panic/frustration" -> {
+                if (shouldSkipLaunch(lastFrustrationLaunchElapsed)) {
+                    Log.d(TAG, "Skipping duplicate frustration activity launch.")
+                    return
+                }
+                lastFrustrationLaunchElapsed = SystemClock.elapsedRealtime()
+
+                // Launch MainActivity to trigger gentle warning haptics for Frustration Interception
+                try {
+                    val intent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra("TRIGGER_FRUSTRATION", true)
+                    }
+                    startActivity(intent)
+                    Log.d(TAG, "Successfully started Wear MainActivity for Frustration Interception.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start watch activity for frustration alert", e)
+                }
+            }
+        }
+    }
+
+    private fun requestOwnedComplicationUpdates() {
+        val progressComponent = android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)
+        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+            .create(applicationContext, progressComponent)
+            .requestUpdateAll()
+
+        val customComponent = android.content.ComponentName(this, CustomTextComplicationService::class.java)
+        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+            .create(applicationContext, customComponent)
+            .requestUpdateAll()
+
+        val bottomRightComponent = android.content.ComponentName(this, BottomRightComplicationService::class.java)
+        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+            .create(applicationContext, bottomRightComponent)
+            .requestUpdateAll()
+
+        requestLogoComplicationUpdate()
+    }
+
+    private fun storeLogoAsset(asset: Asset) {
+        Wearable.getDataClient(this).getFdForAsset(asset)
+            .addOnSuccessListener { result ->
+                runCatching {
+                    result.inputStream.use { input ->
+                        openFileOutput(LOGO_FILENAME, MODE_PRIVATE).use { output -> input.copyTo(output) }
+                    }
+                }.onSuccess {
+                    Log.d(TAG, "Stored custom watch face logo")
+                    requestLogoComplicationUpdate()
+                }.onFailure { error ->
+                    Log.e(TAG, "Failed to store custom watch face logo", error)
+                }
+            }
+            .addOnFailureListener { error -> Log.e(TAG, "Failed to read logo asset", error) }
+    }
+
+    private fun requestLogoComplicationUpdate() {
+        val component = android.content.ComponentName(this, LogoComplicationService::class.java)
+        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+            .create(applicationContext, component)
+            .requestUpdateAll()
+    }
+
+    private fun applyWatchFaceConfig(dataMap: com.google.android.gms.wearable.DataMap) {
+        val schemaVersion = dataMap.getInt(KEY_SCHEMA_VERSION, 1)
+        val revision = dataMap.getString(KEY_REVISION)
+            ?: "legacy-${dataMap.getLong(KEY_TIMESTAMP, System.currentTimeMillis())}"
+
+        try {
+            val configSaved = getSharedPreferences("watchface_config_prefs", MODE_PRIVATE).edit()
+                .putInt(KEY_SCHEMA_VERSION, schemaVersion)
+                .putString(KEY_REVISION, revision)
+                .putString("timer_color", dataMap.getString("timer_color") ?: "#ff00e5ff")
+                .putString("seconds_color", dataMap.getString("seconds_color") ?: "#ff00e5ff")
+                .putString("idle_time_color", dataMap.getString("idle_time_color") ?: "#ffffffff")
+                .putString("custom_text", dataMap.getString("custom_text") ?: "")
+                .putString("left_slot_mode", dataMap.getString("left_slot_mode") ?: "custom_text")
+                .putString("bottom_right_slot_mode", dataMap.getString("bottom_right_slot_mode") ?: "date")
+                .putBoolean("show_panic_logo", dataMap.getBoolean("show_panic_logo", true))
+                .putString("ambient_style", dataMap.getString("ambient_style") ?: "dim")
+                .putString("theme_preset", dataMap.getString("theme_preset") ?: "cyan")
+                .putLong(KEY_TIMESTAMP, dataMap.getLong(KEY_TIMESTAMP, System.currentTimeMillis()))
+                .commit()
+
+            val complicationTextSaved = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE).edit()
+                .putString("custom_text", dataMap.getString("custom_text") ?: "")
+                .commit()
+
+            if (!configSaved || !complicationTextSaved) {
+                throw IllegalStateException("Wear settings could not be persisted")
+            }
+
+            requestOwnedComplicationUpdates()
+            publishConfigAcknowledgement(revision, schemaVersion, true, "Complications synced")
+            Log.d(
+                TAG,
+                "Applied watch face config revision=$revision schema=$schemaVersion preset=${dataMap.getString("theme_preset")}"
+            )
+        } catch (e: Exception) {
+            publishConfigAcknowledgement(
+                revision,
+                schemaVersion,
+                false,
+                e.message ?: "Unable to apply configuration"
+            )
+            Log.e(TAG, "Failed to apply watch face config revision=$revision", e)
+        }
+    }
+
+    private fun publishConfigAcknowledgement(
+        revision: String,
+        schemaVersion: Int,
+        success: Boolean,
+        message: String
+    ) {
+        val request = PutDataMapRequest.create(PATH_WATCHFACE_STATUS_V2).apply {
+            dataMap.putInt(KEY_SCHEMA_VERSION, schemaVersion)
+            dataMap.putString(KEY_REVISION, revision)
+            dataMap.putBoolean(KEY_SUCCESS, success)
+            dataMap.putString(KEY_STATUS_MESSAGE, message)
+            dataMap.putLong(KEY_APPLIED_AT, System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+
+        Wearable.getDataClient(this).putDataItem(request)
+            .addOnFailureListener { error ->
+                Log.e(TAG, "Failed to publish config acknowledgement revision=$revision", error)
+            }
+    }
+
+    private fun shouldSkipLaunch(lastLaunchElapsed: Long): Boolean {
+        return SystemClock.elapsedRealtime() - lastLaunchElapsed < LAUNCH_DEBOUNCE_MS
+    }
+
+    companion object {
+        private const val TAG = "WearSyncService"
+        private const val LAUNCH_DEBOUNCE_MS = 1_500L
+        private const val PATH_WATCHFACE_CONFIG_LEGACY = "/pomodoro/watchface_config"
+        private const val PATH_WATCHFACE_CONFIG_V2 = "/pomodoro/watchface/config/v2"
+        private const val PATH_WATCHFACE_STATUS_V2 = "/pomodoro/watchface/status/v2"
+        private const val PATH_WATCHFACE_LOGO_V1 = "/pomodoro/watchface/logo/v1"
+        private const val KEY_LOGO_ASSET = "logo_asset"
+        private const val KEY_RESET_LOGO = "reset_logo"
+        const val LOGO_FILENAME = "watchface_logo.png"
+        private const val KEY_SCHEMA_VERSION = "schema_version"
+        private const val KEY_REVISION = "revision"
+        private const val KEY_SUCCESS = "success"
+        private const val KEY_STATUS_MESSAGE = "status_message"
+        private const val KEY_APPLIED_AT = "applied_at"
+        private const val KEY_TIMESTAMP = "timestamp"
+    }
+}
