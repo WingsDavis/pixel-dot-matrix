@@ -18,7 +18,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36.1"
+      - run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36.1"
       - uses: gradle/actions/setup-gradle@v5
       - run: chmod +x gradlew
       - name: Test and build debug APKs
