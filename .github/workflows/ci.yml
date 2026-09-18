@@ -26,7 +26,7 @@ jobs:
       - run: chmod +x gradlew
       - name: Test and build debug APKs
         run: ./gradlew --no-parallel testDebugUnitTest :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pixel-dot-matrix-debug-apks
           path: |
