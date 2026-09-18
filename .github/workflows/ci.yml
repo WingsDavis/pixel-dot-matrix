@@ -22,7 +22,7 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager "platforms;android-36.1"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: chmod +x gradlew
       - name: Test and build debug APKs
         run: ./gradlew --no-parallel testDebugUnitTest :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
