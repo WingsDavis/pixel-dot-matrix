@@ -24,7 +24,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
       - name: Test and build preview APKs
-        run: ./gradlew testDebugUnitTest :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
+        run: ./gradlew --no-parallel testDebugUnitTest :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
       - name: Stage release files
         run: |
           mkdir release
