@@ -400,8 +400,14 @@ class WearableSyncManager(
     override fun onMessageReceived(messageEvent: MessageEvent) {
         when (messageEvent.path) {
             PATH_SYNC_ACK -> {
-                val id = String(messageEvent.data, StandardCharsets.UTF_8)
-                scope.launch(Dispatchers.IO) { syncOutbox.markApplied(id) }
+                val acknowledgement = SyncAppliedAck.decode(messageEvent.data) ?: return
+                scope.launch(Dispatchers.IO) {
+                    if (acknowledgement.applied) {
+                        syncOutbox.markApplied(acknowledgement.id)
+                    } else {
+                        syncOutbox.markFailed(acknowledgement.id, acknowledgement.message)
+                    }
+                }
             }
             PATH_PANIC_TRIGGER -> {
                 scope.launch(Dispatchers.Main) {
@@ -422,9 +428,13 @@ class WearableSyncManager(
                 scope.launch(Dispatchers.Main) {
                     if (!TimerSnapshotResolver.commandIsAcceptable(command, timerRevision.get())) {
                         Log.d(TAG, "Rejected stale timer command id=${command.id} base=${command.baseRevision} current=${timerRevision.get()}")
+                        sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, false, "Timer state changed before command arrived")
                         return@launch
                     }
-                    if (!markCommandHandled(command.id)) return@launch
+                    if (!markCommandHandled(command.id)) {
+                        sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, true, null)
+                        return@launch
+                    }
                     when (command.action) {
                         "START" -> engine.start()
                         "PAUSE" -> engine.pause()
@@ -444,6 +454,7 @@ class WearableSyncManager(
                         }
                     }
                     pushStateToWearable()
+                    sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, true, null)
                 }
             }
         }
@@ -455,7 +466,28 @@ class WearableSyncManager(
     }
 
     fun retryPendingSync() {
+        scope.launch(Dispatchers.IO) { syncOutbox.retryFailed() }
+    }
+
+    fun flushPendingSync() {
         scope.launch(Dispatchers.IO) { syncOutbox.flush() }
+    }
+
+    private fun sendTimerCommandAcknowledgement(
+        sourceNodeId: String,
+        commandId: String,
+        applied: Boolean,
+        reason: String?
+    ) {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                messageClient.sendMessage(
+                    sourceNodeId,
+                    PATH_TIMER_COMMAND_ACK,
+                    SyncAppliedAck(commandId, applied, reason).encode()
+                ).await()
+            }.onFailure { error -> Log.e(TAG, "Failed to acknowledge timer command $commandId", error) }
+        }
     }
 
     fun resetWatchFaceLogo() {
@@ -547,6 +579,7 @@ class WearableSyncManager(
         const val PATH_WATCHFACE_LOGO_V1 = "/pomodoro/watchface/logo/v1"
         const val PATH_CUSTOM_TEXT = "/pomodoro/custom_text"
         const val PATH_SYNC_ACK = "/pomodoro/sync_ack"
+        const val PATH_TIMER_COMMAND_ACK = "/pomodoro/control_ack"
         const val PATH_INCIDENT_STATUS = "/incident/status"
 
         const val WATCHFACE_CONFIG_SCHEMA_VERSION = 2

@@ -157,6 +157,22 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - Phone-owned timers count down locally on the watch from their timestamp, keeping the UI and complications current without one Data Layer write per second.
   - Timer commands use unique IDs, so repeated actions remain valid while duplicate delivery stays identifiable.
 
+### Feature 10: Reliable Offline Synchronization
+* **Mobile durable outbox (`SyncOutbox.kt`)**:
+  - Persists message operations in Room as `PENDING`, `DELIVERED`, `APPLIED`, or `FAILED`, including retry count and the latest failure reason.
+  - Coalesces superseded operations, retries on app resume and the connected-node polling loop, and uses bounded exponential backoff with a five-attempt failure limit.
+  - Treats transport delivery separately from a Wear acknowledgement sent only after the operation has been applied.
+* **Idempotent Wear application (`WearSyncService.kt`)**:
+  - Stores recently applied envelope IDs and acknowledges duplicate delivery without repeating the operation.
+  - Returns an applied or failed acknowledgement with a useful reason to the phone.
+  - Watch timer commands remain queued until the phone returns an application acknowledgement; repeated user actions use distinct command IDs.
+* **Persistent Data Layer operations**:
+  - Timer snapshots and watch-face configurations remain urgent persistent DataItems, which coalesce to their newest value while offline.
+  - Incident messages use stable coalescing keys, and the generic Room outbox is ready for compact task summaries introduced in roadmap item 6.
+* **User recovery (`WearScreen.kt`)**:
+  - Watch Face Studio reports pending, delivered, applied, and failed counts separately.
+  - The latest failure reason is visible, and Retry resets terminal failures before immediately flushing the queue.
+
 ---
 
 ## 3. Development Reference

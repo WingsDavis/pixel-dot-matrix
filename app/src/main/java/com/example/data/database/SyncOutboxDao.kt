@@ -12,13 +12,13 @@ interface SyncOutboxDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: SyncOutboxEntity)
 
-    @Query("SELECT * FROM sync_outbox WHERE status IN ('PENDING', 'FAILED', 'SENT') ORDER BY createdAt ASC")
+    @Query("SELECT * FROM sync_outbox WHERE status IN ('PENDING', 'FAILED', 'SENT', 'DELIVERED') ORDER BY createdAt ASC")
     suspend fun pending(): List<SyncOutboxEntity>
 
     @Query("SELECT * FROM sync_outbox ORDER BY createdAt ASC")
     fun observeAll(): Flow<List<SyncOutboxEntity>>
 
-    @Query("DELETE FROM sync_outbox WHERE coalesceKey = :key AND status IN ('PENDING', 'FAILED')")
+    @Query("DELETE FROM sync_outbox WHERE coalesceKey = :key AND status IN ('PENDING', 'FAILED', 'SENT', 'DELIVERED')")
     suspend fun deletePendingByCoalesceKey(key: String)
 
     @Query("UPDATE sync_outbox SET status = :status, retryCount = :retryCount, lastError = :error, updatedAt = :updatedAt WHERE id = :id")
@@ -30,10 +30,28 @@ interface SyncOutboxDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    @Query("UPDATE sync_outbox SET status = 'DELIVERED', lastError = NULL, updatedAt = :updatedAt WHERE id = :id AND status != 'APPLIED'")
+    suspend fun markDelivered(id: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sync_outbox SET status = :status, retryCount = :retryCount, lastError = :error, updatedAt = :updatedAt WHERE id = :id AND status != 'APPLIED'")
+    suspend fun markAttemptFailure(
+        id: String,
+        status: String,
+        retryCount: Int,
+        error: String?,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     @Query("UPDATE sync_outbox SET status = 'APPLIED', lastError = NULL, updatedAt = :updatedAt WHERE id = :id")
     suspend fun markApplied(id: String, updatedAt: Long = System.currentTimeMillis())
 
-    @Query("DELETE FROM sync_outbox WHERE status IN ('DELIVERED', 'APPLIED') AND updatedAt < :before")
+    @Query("UPDATE sync_outbox SET status = 'PENDING', retryCount = 0, lastError = NULL, updatedAt = :updatedAt WHERE status = 'FAILED'")
+    suspend fun retryFailed(updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sync_outbox SET status = 'DELIVERED' WHERE status = 'SENT'")
+    suspend fun migrateSentToDelivered()
+
+    @Query("DELETE FROM sync_outbox WHERE status = 'APPLIED' AND updatedAt < :before")
     suspend fun pruneDelivered(before: Long)
 
     @Query("DELETE FROM sync_outbox")

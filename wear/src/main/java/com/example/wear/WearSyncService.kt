@@ -89,67 +89,65 @@ class WearSyncService : WearableListenerService() {
     override fun onMessageReceived(messageEvent: MessageEvent) {
         super.onMessageReceived(messageEvent)
         Log.d(TAG, "Watch background listener received message path: ${messageEvent.path}")
+        if (messageEvent.path == PATH_TIMER_COMMAND_ACK) {
+            val commandId = messageEvent.data.toString(Charsets.UTF_8).substringBefore('|')
+            if (commandId.isNotBlank()) {
+                WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this))
+                    .acknowledge(commandId)
+            }
+            return
+        }
         val envelope = decodeSyncEnvelope(messageEvent.data)
         val payload = envelope?.payload ?: messageEvent.data
-        envelope?.let(::acknowledge)
-
-        when (messageEvent.path) {
-            "/incident/status" -> {
-                val incidentId = String(payload).substringBefore('|')
-                WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this))
-                    .acknowledge(incidentId)
-            }
-            "/pomodoro/custom_text" -> {
-                val customText = String(payload)
-                Log.d(TAG, "Received custom text via message: $customText")
-                val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
-                prefs.edit().putString("custom_text", customText).apply()
-
-                // Request complication update
-                val componentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
-                androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-                    .create(applicationContext, componentName)
-                    .requestUpdateAll()
-            }
-            "/panic/trigger" -> {
-                if (shouldSkipLaunch(lastPanicLaunchElapsed)) {
-                    Log.d(TAG, "Skipping duplicate panic activity launch.")
-                    return
+        if (envelope != null && wasEnvelopeApplied(envelope.id)) {
+            acknowledge(envelope, messageEvent.sourceNodeId, true, null)
+            return
+        }
+        val result = runCatching {
+            when (messageEvent.path) {
+                "/incident/status" -> {
+                    val incidentId = String(payload).substringBefore('|')
+                    WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this))
+                        .acknowledge(incidentId)
                 }
-                lastPanicLaunchElapsed = SystemClock.elapsedRealtime()
-
-                // Launch MainActivity directly to turn on escalating haptic loop and show step-tracker UI
-                try {
+                "/pomodoro/custom_text" -> {
+                    val customText = String(payload)
+                    Log.d(TAG, "Received custom text via message: $customText")
+                    getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
+                        .edit()
+                        .putString("custom_text", customText)
+                        .commit()
+                    val componentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
+                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+                        .create(applicationContext, componentName)
+                        .requestUpdateAll()
+                }
+                "/panic/trigger" -> if (!shouldSkipLaunch(lastPanicLaunchElapsed)) {
+                    lastPanicLaunchElapsed = SystemClock.elapsedRealtime()
                     val intent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("FORCE_PANIC_UI", true)
                     }
                     startActivity(intent)
                     Log.d(TAG, "Successfully started Wear MainActivity to trigger active intervention.")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to automatically launch watch activity from background listener", e)
                 }
-            }
-            "/panic/frustration" -> {
-                if (shouldSkipLaunch(lastFrustrationLaunchElapsed)) {
-                    Log.d(TAG, "Skipping duplicate frustration activity launch.")
-                    return
-                }
-                lastFrustrationLaunchElapsed = SystemClock.elapsedRealtime()
-
-                // Launch MainActivity to trigger gentle warning haptics for Frustration Interception
-                try {
+                "/panic/frustration" -> if (!shouldSkipLaunch(lastFrustrationLaunchElapsed)) {
+                    lastFrustrationLaunchElapsed = SystemClock.elapsedRealtime()
                     val intent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("TRIGGER_FRUSTRATION", true)
                     }
                     startActivity(intent)
                     Log.d(TAG, "Successfully started Wear MainActivity for Frustration Interception.")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start watch activity for frustration alert", e)
                 }
+                else -> if (envelope != null) error("Unsupported sync path ${messageEvent.path}")
             }
         }
+        if (result.isSuccess && envelope != null) rememberAppliedEnvelope(envelope.id)
+        envelope?.let {
+            acknowledge(it, messageEvent.sourceNodeId, result.isSuccess, result.exceptionOrNull()?.message)
+        }
+        result.exceptionOrNull()?.let { Log.e(TAG, "Failed to apply ${messageEvent.path}", it) }
     }
 
     private fun decodeSyncEnvelope(bytes: ByteArray): SyncEnvelope? {
@@ -166,14 +164,26 @@ class WearSyncService : WearableListenerService() {
         }.getOrNull()
     }
 
-    private fun acknowledge(envelope: SyncEnvelope) {
-        Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
-            nodes.forEach { node ->
-                Wearable.getMessageClient(this)
-                    .sendMessage(node.id, "/pomodoro/sync_ack", envelope.id.toByteArray())
-                    .addOnFailureListener { error -> Log.e(TAG, "Failed to acknowledge sync item", error) }
-            }
-        }
+    private fun acknowledge(envelope: SyncEnvelope, sourceNodeId: String, applied: Boolean, reason: String?) {
+        val encodedReason = android.util.Base64.encodeToString(reason.orEmpty().toByteArray(), android.util.Base64.NO_WRAP)
+        val payload = "${envelope.id}|${if (applied) "APPLIED" else "FAILED"}|$encodedReason".toByteArray()
+        Wearable.getMessageClient(this)
+            .sendMessage(sourceNodeId, "/pomodoro/sync_ack", payload)
+            .addOnFailureListener { error -> Log.e(TAG, "Failed to acknowledge sync item", error) }
+    }
+
+    private fun wasEnvelopeApplied(id: String): Boolean =
+        getSharedPreferences(APPLIED_ENVELOPES_PREFS, MODE_PRIVATE)
+            .getStringSet(KEY_APPLIED_ENVELOPES, emptySet())
+            .orEmpty()
+            .contains(id)
+
+    private fun rememberAppliedEnvelope(id: String) {
+        val preferences = getSharedPreferences(APPLIED_ENVELOPES_PREFS, MODE_PRIVATE)
+        val ids = preferences.getStringSet(KEY_APPLIED_ENVELOPES, emptySet()).orEmpty().toMutableSet()
+        if (ids.size >= MAX_APPLIED_ENVELOPES) ids.clear()
+        ids += id
+        preferences.edit().putStringSet(KEY_APPLIED_ENVELOPES, ids).commit()
     }
 
     private data class SyncEnvelope(val id: String, val payload: ByteArray)
@@ -298,6 +308,10 @@ class WearSyncService : WearableListenerService() {
         private const val PATH_WATCHFACE_CONFIG_V2 = "/pomodoro/watchface/config/v2"
         private const val PATH_WATCHFACE_STATUS_V2 = "/pomodoro/watchface/status/v2"
         private const val PATH_WATCHFACE_LOGO_V1 = "/pomodoro/watchface/logo/v1"
+        private const val PATH_TIMER_COMMAND_ACK = "/pomodoro/control_ack"
+        private const val APPLIED_ENVELOPES_PREFS = "applied_sync_envelopes"
+        private const val KEY_APPLIED_ENVELOPES = "ids"
+        private const val MAX_APPLIED_ENVELOPES = 256
         private const val KEY_LOGO_ASSET = "logo_asset"
         private const val KEY_RESET_LOGO = "reset_logo"
         const val LOGO_FILENAME = "watchface_logo.png"

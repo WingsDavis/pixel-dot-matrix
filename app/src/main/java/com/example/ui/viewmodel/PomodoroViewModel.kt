@@ -467,6 +467,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun retryPendingSync() = wearableSyncManager.retryPendingSync()
+    fun resumePendingSync() = wearableSyncManager.flushPendingSync()
 
     fun clearSessionHistory() = viewModelScope.launch { repository.clearAllSessions() }
     fun clearIncidentHistory() = viewModelScope.launch { repository.clearAllPanicLogs() }

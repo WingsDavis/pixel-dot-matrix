@@ -415,20 +415,31 @@ fun WearScreen(
             textAlign = TextAlign.Center
         )
 
-        val pendingCount = outboxItems.count { it.status == SyncOutboxEntity.STATUS_PENDING || it.status == SyncOutboxEntity.STATUS_SENT }
-        val failedCount = outboxItems.count { it.status == SyncOutboxEntity.STATUS_FAILED }
-        val appliedCount = outboxItems.count {
-            it.status == SyncOutboxEntity.STATUS_APPLIED || it.status == SyncOutboxEntity.STATUS_DELIVERED
+        val pendingCount = outboxItems.count { it.status == SyncOutboxEntity.STATUS_PENDING }
+        val deliveredCount = outboxItems.count {
+            it.status == SyncOutboxEntity.STATUS_DELIVERED || it.status == SyncOutboxEntity.STATUS_SENT
         }
+        val failedCount = outboxItems.count { it.status == SyncOutboxEntity.STATUS_FAILED }
+        val appliedCount = outboxItems.count { it.status == SyncOutboxEntity.STATUS_APPLIED }
+        val latestFailure = outboxItems.lastOrNull { it.status == SyncOutboxEntity.STATUS_FAILED }
         if (outboxItems.isNotEmpty()) {
             StudioSection(title = "Sync Queue", icon = Icons.Default.Watch) {
                 Text(
-                    text = "$pendingCount pending  ·  $failedCount failed  ·  $appliedCount applied",
+                    text = "$pendingCount pending  ·  $deliveredCount delivered  ·  $appliedCount applied  ·  $failedCount failed",
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 )
+                latestFailure?.let { failed ->
+                    Text(
+                        text = "${failed.path.substringAfterLast('/')}: ${failed.lastError ?: "Watch did not apply this change"}",
+                        color = Color(0xFFEF5350),
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                }
                 if (failedCount > 0 || pendingCount > 0) {
                     OutlinedButton(
                         onClick = viewModel::retryPendingSync,

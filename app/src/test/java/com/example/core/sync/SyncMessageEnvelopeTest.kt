@@ -18,4 +18,15 @@ class SyncMessageEnvelopeTest {
     fun ignoresLegacyPayloads() {
         assertNull(SyncMessageEnvelope.decode("legacy".toByteArray()))
     }
+
+    @Test
+    fun appliedAcknowledgementPreservesFailureReason() {
+        val acknowledgement = SyncAppliedAck("item-2", false, "Unsupported payload")
+        assertEquals(acknowledgement, SyncAppliedAck.decode(acknowledgement.encode()))
+    }
+
+    @Test
+    fun legacyAcknowledgementMeansApplied() {
+        assertEquals(SyncAppliedAck("item-3", true), SyncAppliedAck.decode("item-3".toByteArray()))
+    }
 }

@@ -204,6 +204,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.resumePendingSync()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {

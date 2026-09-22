@@ -658,6 +658,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     override fun onMessageReceived(messageEvent: MessageEvent) {
         Log.d(TAG, "Watch received message: ${messageEvent.path}")
         when (messageEvent.path) {
+            "/pomodoro/control_ack" -> {
+                val commandId = messageEvent.data.toString(Charsets.UTF_8).substringBefore('|')
+                if (commandId.isNotBlank()) commandOutbox.acknowledge(commandId)
+            }
             "/panic/trigger" -> {
                 _stateName.value = "PANIC_MODE"
                 saveStateToPrefs("PANIC_MODE", _secondsRemaining.value, _isRunning.value)
@@ -668,7 +672,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 saveStateToPrefs("FOCUS", _secondsRemaining.value, _isRunning.value)
             }
             "/pomodoro/custom_text" -> {
-                val customText = String(messageEvent.data)
+                val customText = String(decodeSyncPayload(messageEvent.data))
                 getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE).edit()
                     .putString("custom_text", customText)
                     .apply()
@@ -681,6 +685,13 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 _isFrustrated.value = true
             }
         }
+    }
+
+    private fun decodeSyncPayload(bytes: ByteArray): ByteArray {
+        val raw = bytes.toString(Charsets.UTF_8)
+        if (!raw.startsWith("sync1|")) return bytes
+        val encoded = raw.removePrefix("sync1|").substringAfter('|', missingDelimiterValue = "")
+        return runCatching { android.util.Base64.decode(encoded, android.util.Base64.DEFAULT) }.getOrDefault(bytes)
     }
 
     // --- Active Escalating Haptics for Panic Interventions ---
