@@ -57,6 +57,8 @@ class WearableSyncManager(
     }
     private val _watchFaceSyncStatus = MutableStateFlow(WatchFaceSyncStatus())
     val watchFaceSyncStatus: StateFlow<WatchFaceSyncStatus> = _watchFaceSyncStatus.asStateFlow()
+    private val _connectedNodeCount = MutableStateFlow(0)
+    val connectedNodeCount: StateFlow<Int> = _connectedNodeCount.asStateFlow()
 
     @Volatile
     private var pendingWatchFaceRevision: String? = null
@@ -74,6 +76,7 @@ class WearableSyncManager(
         scope.launch(Dispatchers.IO) { replayStoredWatchFaceConfig() }
         scope.launch(Dispatchers.IO) {
             while (isActive) {
+                _connectedNodeCount.value = runCatching { nodeClient.connectedNodes.await().size }.getOrDefault(0)
                 delay(OUTBOX_RETRY_INTERVAL_MS)
                 syncOutbox.flush()
             }

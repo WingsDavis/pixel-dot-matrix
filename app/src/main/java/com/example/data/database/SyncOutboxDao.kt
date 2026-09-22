@@ -35,4 +35,7 @@ interface SyncOutboxDao {
 
     @Query("DELETE FROM sync_outbox WHERE status IN ('DELIVERED', 'APPLIED') AND updatedAt < :before")
     suspend fun pruneDelivered(before: Long)
+
+    @Query("DELETE FROM sync_outbox")
+    suspend fun clearAll()
 }

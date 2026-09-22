@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,7 +36,6 @@ import com.example.ui.components.BentoPillButton
 import com.example.ui.theme.CardBlack
 import com.example.ui.theme.CardWhite
 import com.example.ui.theme.TealAccent
-import kotlinx.coroutines.launch
 
 @Composable
 fun SetupScreen(
@@ -45,7 +43,12 @@ fun SetupScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
+    val sessions by viewModel.sessionLogs.collectAsState()
+    val incidents by viewModel.panicLogs.collectAsState()
+    val syncItems by viewModel.syncOutboxItems.collectAsState(initial = emptyList())
+    val connectedWatchCount by viewModel.connectedWatchCount.collectAsState()
+    val isDnsActive by viewModel.isDnsSinkholeActive.collectAsState()
+    var deleteTarget by remember { mutableStateOf<String?>(null) }
 
     // Timer durations config state
     var focusMin by remember { mutableStateOf(viewModel.engine.focusDuration / 60) }
@@ -82,8 +85,33 @@ fun SetupScreen(
     LaunchedEffect(Unit) {
         while (true) {
             hasOverlayPermission = Settings.canDrawOverlays(context)
+            hasActivityRecognitionPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+            } else true
             kotlinx.coroutines.delay(1500)
         }
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete local data?") },
+            text = { Text("This removes $target from this phone and cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    when (target) {
+                        "session history" -> viewModel.clearSessionHistory()
+                        "incident history" -> viewModel.clearIncidentHistory()
+                        "pending sync operations" -> viewModel.clearSyncQueue()
+                        "watch artwork and face settings" -> viewModel.resetWatchFace()
+                        "protection profiles" -> viewModel.clearProtectionSettings()
+                    }
+                    Toast.makeText(context, "Deleted $target", Toast.LENGTH_SHORT).show()
+                    deleteTarget = null
+                }) { Text("Delete", color = Color(0xFFFF5252)) }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
+        )
     }
 
     Column(
@@ -334,74 +362,30 @@ fun SetupScreen(
                 Text("Sessions, incidents, preferences, and watch artwork stay in local app storage unless synchronized to your paired watch.", color = CardWhite.copy(alpha = 0.7f), fontSize = 12.sp)
                 Text("Overlay: ${if (hasOverlayPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
                 Text("Physical activity: ${if (hasActivityRecognitionPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
-                OutlinedButton(onClick = { coroutineScope.launch { com.example.data.database.AppDatabase.getDatabase(context).sessionDao().clearAllSessions() } }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Delete session history")
+                Text("DNS protection: ${if (isDnsActive) "active" else "inactive"}", color = CardWhite, fontSize = 12.sp)
+                Text("Wear connection: ${if (connectedWatchCount > 0) "$connectedWatchCount connected" else "disconnected"}", color = CardWhite, fontSize = 12.sp)
+                Text("Stored locally: ${sessions.size} sessions · ${incidents.size} incidents · ${syncItems.size} sync records", color = CardWhite.copy(alpha = 0.7f), fontSize = 11.sp)
+                OutlinedButton(onClick = { deleteTarget = "session history" }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Delete session history (${sessions.size})")
                 }
-                OutlinedButton(onClick = { coroutineScope.launch { com.example.data.database.AppDatabase.getDatabase(context).panicDao().clearAllPanicLogs() } }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Delete incident history")
+                OutlinedButton(onClick = { deleteTarget = "incident history" }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Delete incident history (${incidents.size})")
                 }
-                OutlinedButton(onClick = { viewModel.resetWatchFace() }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { deleteTarget = "pending sync operations" }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Delete sync queue (${syncItems.size})")
+                }
+                OutlinedButton(onClick = { deleteTarget = "watch artwork and face settings" }, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete watch artwork & face settings")
                 }
-            }
-        }
-
-        // Clear Storage Card
-        BentoCard(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFFFE5E5),
-            shape = RoundedCornerShape(32.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(Color(0xFFFF3B30), RoundedCornerShape(16.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = "Clear Icon",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Text(
-                        text = "Data Management",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = Color(0xFFFF3B30)
-                    )
+                OutlinedButton(onClick = { deleteTarget = "protection profiles" }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Delete protection profiles")
                 }
-
-                Text(
-                    text = "Clear all locally cached SQLite Room logs including session records and alert history.",
-                    fontSize = 13.sp,
-                    color = Color(0xFFFF3B30).copy(alpha = 0.8f)
-                )
-
-                BentoPillButton(
-                    text = "Purge Room database",
-                    color = Color(0xFFFF3B30),
-                    contentColor = Color.White,
-                    onClick = {
-                        coroutineScope.launch {
-                            viewModel.engine.reset()
-                            val db = com.example.data.database.AppDatabase.getDatabase(context)
-                            db.sessionDao().clearAllSessions()
-                            db.panicDao().clearAllPanicLogs()
-                            Toast.makeText(context, "All logs cleared from local Room DB", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/WingsDavis/pixel-dot-matrix")))
+                }, modifier = Modifier.fillMaxWidth()) { Text("View source repository") }
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/WingsDavis/pixel-dot-matrix/blob/main/THIRD_PARTY_NOTICES.md")))
+                }, modifier = Modifier.fillMaxWidth()) { Text("Open licenses & notices") }
             }
         }
 

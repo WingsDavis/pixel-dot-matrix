@@ -40,6 +40,7 @@ class DomainProfileStore(context: Context) {
     fun isTemporarilyUnblocked(now: Long = System.currentTimeMillis()) = now < prefs.getLong(KEY_UNBLOCK_UNTIL, 0L)
     fun autoActivateDuringFocus(): Boolean = prefs.getBoolean(KEY_AUTO_FOCUS, false)
     fun setAutoActivateDuringFocus(enabled: Boolean) = prefs.edit().putBoolean(KEY_AUTO_FOCUS, enabled).apply()
+    fun clearAll() = prefs.edit().clear().apply()
 
     private fun readProfiles(): List<DomainProfile> {
         val stored = prefs.getStringSet(KEY_PROFILES, emptySet()).orEmpty().mapNotNull(::decode)

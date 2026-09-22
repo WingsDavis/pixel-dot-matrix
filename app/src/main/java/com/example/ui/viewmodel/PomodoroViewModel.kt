@@ -61,6 +61,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     val watchFacePresets = wearableSyncManager.watchFacePresets
     val watchFaceRecentColors = wearableSyncManager.watchFaceRecentColors
     val syncOutboxItems = wearableSyncManager.syncOutboxItems
+    val connectedWatchCount = wearableSyncManager.connectedNodeCount
 
     // Step Counter state
     private val _stepsTakenInPanic = MutableStateFlow(0)
@@ -378,6 +379,11 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun retryPendingSync() = wearableSyncManager.retryPendingSync()
+
+    fun clearSessionHistory() = viewModelScope.launch { repository.clearAllSessions() }
+    fun clearIncidentHistory() = viewModelScope.launch { repository.clearAllPanicLogs() }
+    fun clearSyncQueue() = viewModelScope.launch { database.syncOutboxDao().clearAll() }
+    fun clearProtectionSettings() = domainProfiles.clearAll()
 
     fun syncWatchFaceLogo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
