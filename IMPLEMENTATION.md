@@ -173,6 +173,19 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - Watch Face Studio reports pending, delivered, applied, and failed counts separately.
   - The latest failure reason is visible, and Retry resets terminal failures before immediately flushing the queue.
 
+### Feature 11: Watch-Face Configuration Persistence
+* **Phone editor DataStore (`WatchFaceConfigStore.kt`)**:
+  - Migrates the legacy `phone_watchface_config` SharedPreferences file into Preferences DataStore on first read.
+  - Persists colors, custom text, logo visibility, preset, left and bottom-right slot modes, ambient style, user presets, recent colors, and independent local/watch revisions.
+  - Hydrates synchronously before Watch Face Studio renders and saves coherent editor drafts through a conflated queue.
+* **Revision and reset behavior**:
+  - Every local draft receives its own local revision while preserving the last watch-applied revision, so the Studio can report a real difference.
+  - A watch acknowledgement only advances `appliedRevision`; it does not replace newer local edits.
+  - Reset restores every built-in default, sends a logo-reset DataItem, and applies a new revision to the watch.
+* **Editor completeness (`WearScreen.kt`)**:
+  - Left-slot mode, bottom-right mode, and ambient style are editable and included in previews, drafts, presets, replay, reset, and sync payloads.
+  - The phone model is independent of the WFF package lifecycle, so reinstalling or updating the watch face cannot erase the saved phone configuration.
+
 ---
 
 ## 3. Development Reference

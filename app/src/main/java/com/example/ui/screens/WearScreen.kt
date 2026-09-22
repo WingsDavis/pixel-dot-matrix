@@ -57,6 +57,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -144,6 +145,9 @@ fun WearScreen(
     var themePreset by remember(savedConfig.preset) { mutableStateOf(savedConfig.preset) }
     var customText by remember(savedConfig.customText) { mutableStateOf(savedConfig.customText) }
     var showPanicLogo by remember(savedConfig.showLogo) { mutableStateOf(savedConfig.showLogo) }
+    var leftSlotMode by remember(savedConfig.leftSlotMode) { mutableStateOf(savedConfig.leftSlotMode) }
+    var bottomRightSlotMode by remember(savedConfig.bottomRightSlotMode) { mutableStateOf(savedConfig.bottomRightSlotMode) }
+    var ambientStyle by remember(savedConfig.ambientStyle) { mutableStateOf(savedConfig.ambientStyle) }
     var customLogo by remember { mutableStateOf<Bitmap?>(null) }
     var logoZoom by remember { mutableStateOf(1f) }
     var logoOffsetX by remember { mutableStateOf(0f) }
@@ -153,6 +157,7 @@ fun WearScreen(
     var presetDialog by remember { mutableStateOf<String?>(null) }
     var presetName by remember { mutableStateOf("") }
     var selectedUserPreset by remember { mutableStateOf<String?>(null) }
+    var editorHydrated by remember { mutableStateOf(false) }
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             customLogo = decodeLogoPreview(context, uri)
@@ -164,6 +169,37 @@ fun WearScreen(
                 logoOffsetY = 0f
                 Toast.makeText(context, "Logo ready to apply", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    LaunchedEffect(
+        hourColor.hex,
+        minuteColor.hex,
+        secondColor.hex,
+        customText,
+        showPanicLogo,
+        themePreset,
+        leftSlotMode,
+        bottomRightSlotMode,
+        ambientStyle
+    ) {
+        if (!editorHydrated) {
+            editorHydrated = true
+        } else {
+            viewModel.saveWatchFaceDraft(
+                WatchFaceConfig(
+                    hourColor = hourColor.hex,
+                    minuteColor = minuteColor.hex,
+                    secondColor = secondColor.hex,
+                    customText = customText,
+                    showLogo = showPanicLogo,
+                    preset = themePreset,
+                    leftSlotMode = leftSlotMode,
+                    bottomRightSlotMode = bottomRightSlotMode,
+                    ambientStyle = ambientStyle,
+                    appliedRevision = savedConfig.appliedRevision
+                )
+            )
         }
     }
 
@@ -184,7 +220,20 @@ fun WearScreen(
                     val name = presetName.trim()
                     if (name.isNotEmpty()) {
                         when (presetDialog) {
-                            "save" -> viewModel.saveWatchFacePreset(name, WatchFaceConfig(hourColor.hex, minuteColor.hex, secondColor.hex, customText, showPanicLogo, name))
+                            "save" -> viewModel.saveWatchFacePreset(
+                                name,
+                                WatchFaceConfig(
+                                    hourColor = hourColor.hex,
+                                    minuteColor = minuteColor.hex,
+                                    secondColor = secondColor.hex,
+                                    customText = customText,
+                                    showLogo = showPanicLogo,
+                                    preset = name,
+                                    leftSlotMode = leftSlotMode,
+                                    bottomRightSlotMode = bottomRightSlotMode,
+                                    ambientStyle = ambientStyle
+                                )
+                            )
                             "rename" -> selectedUserPreset?.let { viewModel.renameWatchFacePreset(it, name) }
                             "duplicate" -> selectedUserPreset?.let { viewModel.duplicateWatchFacePreset(it, name) }
                         }
@@ -215,8 +264,8 @@ fun WearScreen(
             minuteColor = minuteColor.color,
             secondColor = secondColor.color,
             customText = customText,
-            leftSlotMode = "custom_text",
-            bottomRightSlotMode = "date",
+            leftSlotMode = leftSlotMode,
+            bottomRightSlotMode = bottomRightSlotMode,
             showPanicLogo = showPanicLogo,
             logoBitmap = customLogo?.asImageBitmap(),
             logoScale = logoZoom,
@@ -366,6 +415,41 @@ fun WearScreen(
                 maxLines = 6,
                 modifier = Modifier.fillMaxWidth()
             )
+            Text("Left slot", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            StudioChipRow(
+                values = listOf("custom_text", "phase", "heart_rate", "next_break", "streak", "hidden"),
+                selectedValue = leftSlotMode,
+                onSelected = { leftSlotMode = it },
+                labels = mapOf(
+                    "custom_text" to "Text",
+                    "phase" to "Phase",
+                    "heart_rate" to "Heart",
+                    "next_break" to "Next Break",
+                    "streak" to "Streak",
+                    "hidden" to "Hidden"
+                )
+            )
+            Text("Bottom right", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            StudioChipRow(
+                values = listOf("date", "phase", "timer", "battery", "daily_target", "hidden"),
+                selectedValue = bottomRightSlotMode,
+                onSelected = { bottomRightSlotMode = it },
+                labels = mapOf(
+                    "date" to "Date",
+                    "phase" to "Phase",
+                    "timer" to "Timer",
+                    "battery" to "Battery",
+                    "daily_target" to "Target",
+                    "hidden" to "Hidden"
+                )
+            )
+            Text("Ambient", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            StudioChipRow(
+                values = listOf("dim", "minimal"),
+                selectedValue = ambientStyle,
+                onSelected = { ambientStyle = it },
+                labels = mapOf("dim" to "Dim", "minimal" to "Minimal")
+            )
         }
 
         Button(
@@ -375,10 +459,10 @@ fun WearScreen(
                     secondsColor = secondColor.hex,
                     idleTimeColor = minuteColor.hex,
                     customText = customText,
-                    leftSlotMode = "custom_text",
-                    bottomRightSlotMode = "date",
+                    leftSlotMode = leftSlotMode,
+                    bottomRightSlotMode = bottomRightSlotMode,
                     showPanicLogo = showPanicLogo,
-                    ambientStyle = "dim",
+                    ambientStyle = ambientStyle,
                     themePreset = themePreset
                 )
             },

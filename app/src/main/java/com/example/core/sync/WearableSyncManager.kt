@@ -6,6 +6,7 @@ import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
 import com.google.android.gms.wearable.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,8 @@ data class WatchFaceSyncStatus(
     val message: String = "Not synced yet",
     val appliedAt: Long? = null
 )
+
+private data class WatchFaceDraft(val version: Long, val config: WatchFaceConfig)
 
 class WearableSyncManager(
     private val context: Context,
@@ -71,6 +74,9 @@ class WearableSyncManager(
     private var lastPublishedState = engine.currentState.value
     private var currentSnapshot = restoredTimerSnapshot ?: createTimerSnapshot(timerRevision.get())
     private val handledCommandIds = LinkedHashSet<String>()
+    private val watchFaceDraftVersion = AtomicLong(0L)
+    private val lastSyncedDraftVersion = AtomicLong(0L)
+    private val watchFaceDrafts = Channel<WatchFaceDraft>(Channel.CONFLATED)
     @Volatile
     private var hasPublishedInProcess = false
 
@@ -82,6 +88,18 @@ class WearableSyncManager(
             localNodeId = runCatching { nodeClient.localNode.await().id }.getOrDefault(SOURCE_PHONE)
         }
         scope.launch(Dispatchers.IO) { syncOutbox.flush() }
+        scope.launch(Dispatchers.IO) {
+            for (draft in watchFaceDrafts) {
+                if (draft.version <= lastSyncedDraftVersion.get()) continue
+                val current = watchFaceConfigStore.config.value
+                watchFaceConfigStore.save(
+                    draft.config.copy(
+                        localRevision = "draft-${UUID.randomUUID()}",
+                        appliedRevision = current.appliedRevision
+                    )
+                )
+            }
+        }
         scope.launch(Dispatchers.IO) { replayStoredWatchFaceConfig() }
         scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -246,6 +264,7 @@ class WearableSyncManager(
         ambientStyle: String,
         themePreset: String
     ) {
+        lastSyncedDraftVersion.set(watchFaceDraftVersion.get())
         val revision = UUID.randomUUID().toString()
         watchFaceConfigStore.save(
             WatchFaceConfig(
@@ -255,6 +274,9 @@ class WearableSyncManager(
                 customText = customText,
                 showLogo = showPanicLogo,
                 preset = themePreset,
+                leftSlotMode = leftSlotMode,
+                bottomRightSlotMode = bottomRightSlotMode,
+                ambientStyle = ambientStyle,
                 localRevision = revision,
                 appliedRevision = watchFaceConfigStore.config.value.appliedRevision
             )
@@ -505,6 +527,10 @@ class WearableSyncManager(
         watchFaceConfigStore.preset(id)?.config?.let(watchFaceConfigStore::save)
     }
 
+    fun saveWatchFaceDraft(config: WatchFaceConfig) {
+        watchFaceDrafts.trySend(WatchFaceDraft(watchFaceDraftVersion.incrementAndGet(), config))
+    }
+
     fun saveWatchFacePreset(name: String, config: WatchFaceConfig) = watchFaceConfigStore.savePreset(name, config)
     fun duplicateWatchFacePreset(id: String, name: String) = watchFaceConfigStore.duplicatePreset(id, name)
     fun renameWatchFacePreset(id: String, name: String) = watchFaceConfigStore.renamePreset(id, name)
@@ -519,10 +545,10 @@ class WearableSyncManager(
             secondsColor = defaults.secondColor,
             idleTimeColor = defaults.minuteColor,
             customText = defaults.customText,
-            leftSlotMode = "custom_text",
-            bottomRightSlotMode = "date",
+            leftSlotMode = defaults.leftSlotMode,
+            bottomRightSlotMode = defaults.bottomRightSlotMode,
             showPanicLogo = defaults.showLogo,
-            ambientStyle = "dim",
+            ambientStyle = defaults.ambientStyle,
             themePreset = defaults.preset
         )
     }
@@ -535,10 +561,10 @@ class WearableSyncManager(
             secondsColor = config.secondColor,
             idleTimeColor = config.minuteColor,
             customText = config.customText,
-            leftSlotMode = "custom_text",
-            bottomRightSlotMode = "date",
+            leftSlotMode = config.leftSlotMode,
+            bottomRightSlotMode = config.bottomRightSlotMode,
             showPanicLogo = config.showLogo,
-            ambientStyle = "dim",
+            ambientStyle = config.ambientStyle,
             themePreset = config.preset
         )
     }

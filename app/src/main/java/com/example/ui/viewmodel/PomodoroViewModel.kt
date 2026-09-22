@@ -456,6 +456,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         wearableSyncManager.applyWatchFacePreset(id)
     }
 
+    fun saveWatchFaceDraft(config: com.example.core.sync.WatchFaceConfig) {
+        wearableSyncManager.saveWatchFaceDraft(config)
+    }
+
     fun saveWatchFacePreset(name: String, config: com.example.core.sync.WatchFaceConfig) = wearableSyncManager.saveWatchFacePreset(name, config)
     fun duplicateWatchFacePreset(id: String, name: String) = wearableSyncManager.duplicateWatchFacePreset(id, name)
     fun renameWatchFacePreset(id: String, name: String) = wearableSyncManager.renameWatchFacePreset(id, name)

@@ -20,12 +20,12 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
-| 1. State and reliability | 1-5 | 3 | 1 | 0 | 1 |
+| 1. State and reliability | 1-5 | 4 | 0 | 0 | 1 |
 | 2. Phone productivity | 6-10 | 0 | 1 | 0 | 4 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **3** | **11** | **0** | **6** |
+| **Total** | **20** | **4** | **10** | **0** | **6** |
 
 ## Master Tracker
 
@@ -34,7 +34,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 1 | Persist timer settings | P0 | `[x]` | None |
 | 2 | Shared timer authority | P0 | `[x]` | 1 |
 | 3 | Reliable offline synchronization | P0 | `[x]` | 2 |
-| 4 | Watch-face configuration persistence | P0 | `[~]` | 1, 3 |
+| 4 | Watch-face configuration persistence | P0 | `[x]` | 1, 3 |
 | 5 | Session automation | P1 | `[ ]` | 1, 2 |
 | 6 | Compact task queue | P1 | `[ ]` | 1 |
 | 7 | Daily focus target | P1 | `[ ]` | 1, 2 |
@@ -109,7 +109,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - [x] Failed operations expose a retry action and useful error reason.
 - [x] Integration tests cover disconnect, reconnect, and duplicate delivery.
 
-### 4. Watch-Face Configuration Persistence `[~]`
+### 4. Watch-Face Configuration Persistence `[x]`
 
 **Existing foundation**
 - The Wear app stores configuration in SharedPreferences.
@@ -122,10 +122,10 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Record last local revision and last watch-applied revision separately.
 
 **Acceptance criteria**
-- [ ] Editor state survives process death and reboot.
-- [ ] Reset removes the custom logo and restores `ws_logo`.
-- [ ] The phone shows when local and watch configurations differ.
-- [ ] Reinstalling/updating WFF does not silently erase the phone preset.
+- [x] Editor state survives process death and reboot.
+- [x] Reset removes the custom logo and restores `ws_logo`.
+- [x] The phone shows when local and watch configurations differ.
+- [x] Reinstalling/updating WFF does not silently erase the phone preset.
 
 ### 5. Session Automation `[ ]`
 
