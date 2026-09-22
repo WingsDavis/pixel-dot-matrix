@@ -12,7 +12,7 @@ interface SyncOutboxDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: SyncOutboxEntity)
 
-    @Query("SELECT * FROM sync_outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
+    @Query("SELECT * FROM sync_outbox WHERE status IN ('PENDING', 'FAILED', 'SENT') ORDER BY createdAt ASC")
     suspend fun pending(): List<SyncOutboxEntity>
 
     @Query("SELECT * FROM sync_outbox ORDER BY createdAt ASC")
@@ -30,6 +30,9 @@ interface SyncOutboxDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
-    @Query("DELETE FROM sync_outbox WHERE status = 'DELIVERED' AND updatedAt < :before")
+    @Query("UPDATE sync_outbox SET status = 'APPLIED', lastError = NULL, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun markApplied(id: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM sync_outbox WHERE status IN ('DELIVERED', 'APPLIED') AND updatedAt < :before")
     suspend fun pruneDelivered(before: Long)
 }

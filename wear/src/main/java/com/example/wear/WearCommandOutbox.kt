@@ -14,7 +14,8 @@ class WearCommandOutbox(
     private val prefs = context.getSharedPreferences("wear_command_outbox", Context.MODE_PRIVATE)
 
     fun sendOrQueue(path: String, payload: String, baseRevision: Long): Boolean {
-        val encoded = listOf("v2", UUID.randomUUID().toString(), baseRevision, "wear", payload).joinToString("|")
+        val commandId = UUID.nameUUIDFromBytes("$path|$payload".toByteArray()).toString()
+        val encoded = listOf("v2", commandId, baseRevision, "wear", payload).joinToString("|")
         val nodes = Tasks.await(nodeClient.connectedNodes)
         if (nodes.isEmpty()) {
             queue(path, encoded)
@@ -42,6 +43,8 @@ class WearCommandOutbox(
 
     private fun queue(path: String, encoded: String) {
         val items = prefs.getStringSet(KEY_ITEMS, emptySet()).orEmpty().toMutableSet()
+        val id = encoded.split('|').getOrNull(1)
+        if (id != null && items.any { it.substringAfter('\n').split('|').getOrNull(1) == id }) return
         items += "$path\n$encoded"
         prefs.edit().putStringSet(KEY_ITEMS, items).apply()
     }

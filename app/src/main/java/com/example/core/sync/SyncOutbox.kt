@@ -32,9 +32,10 @@ class SyncOutbox(
         if (nodes.isEmpty()) return
         dao.pending().forEach { item ->
             runCatching {
-                nodes.forEach { node -> messageClient.sendMessage(node.id, item.path, item.payload).await() }
+                val envelope = SyncMessageEnvelope(item.id, item.payload).encode()
+                nodes.forEach { node -> messageClient.sendMessage(node.id, item.path, envelope).await() }
             }.onSuccess {
-                dao.updateStatus(item.id, SyncOutboxEntity.STATUS_DELIVERED, item.retryCount, null)
+                dao.updateStatus(item.id, SyncOutboxEntity.STATUS_SENT, item.retryCount, null)
             }.onFailure { error ->
                 dao.updateStatus(
                     item.id,
@@ -46,6 +47,8 @@ class SyncOutbox(
         }
         dao.pruneDelivered(System.currentTimeMillis() - DELIVERED_RETENTION_MS)
     }
+
+    suspend fun markApplied(id: String) = dao.markApplied(id)
 
     companion object {
         private const val DELIVERED_RETENTION_MS = 24 * 60 * 60 * 1000L

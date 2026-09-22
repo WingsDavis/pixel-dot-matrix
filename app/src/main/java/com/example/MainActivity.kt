@@ -136,10 +136,7 @@ class MainActivity : ComponentActivity() {
                         }
                     } else {
                         // Ensure service is stopped when panic is resolved
-                        val intent = Intent(this@MainActivity, PanicOverlayService::class.java).apply {
-                            action = PanicOverlayService.ACTION_HIDE
-                        }
-                        startService(intent)
+                        stopService(Intent(this@MainActivity, PanicOverlayService::class.java))
                     }
                 }
 

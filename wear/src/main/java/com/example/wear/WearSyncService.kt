@@ -36,6 +36,8 @@ class WearSyncService : WearableListenerService() {
                     val secondsRemaining = dataMap.getInt("seconds_remaining")
                     val isRunning = dataMap.getBoolean("is_running")
                     val timerRevision = dataMap.getLong("timer_revision", -1L)
+                    val dailyFocusMinutes = dataMap.getInt("daily_focus_minutes", 0)
+                    val dailyTargetMinutes = dataMap.getInt("daily_target_minutes", 120)
 
                     val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
                     prefs.edit()
@@ -43,6 +45,8 @@ class WearSyncService : WearableListenerService() {
                         .putInt("seconds_remaining", secondsRemaining)
                         .putBoolean("is_running", isRunning)
                         .putLong("timer_revision", timerRevision)
+                        .putInt("daily_focus_minutes", dailyFocusMinutes)
+                        .putInt("daily_target_minutes", dailyTargetMinutes)
                         .apply()
 
                     // Request complication update for both progress and custom text
@@ -76,10 +80,13 @@ class WearSyncService : WearableListenerService() {
     override fun onMessageReceived(messageEvent: MessageEvent) {
         super.onMessageReceived(messageEvent)
         Log.d(TAG, "Watch background listener received message path: ${messageEvent.path}")
+        val envelope = decodeSyncEnvelope(messageEvent.data)
+        val payload = envelope?.payload ?: messageEvent.data
+        envelope?.let(::acknowledge)
 
         when (messageEvent.path) {
             "/pomodoro/custom_text" -> {
-                val customText = String(messageEvent.data)
+                val customText = String(payload)
                 Log.d(TAG, "Received custom text via message: $customText")
                 val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
                 prefs.edit().putString("custom_text", customText).apply()
@@ -130,6 +137,32 @@ class WearSyncService : WearableListenerService() {
             }
         }
     }
+
+    private fun decodeSyncEnvelope(bytes: ByteArray): SyncEnvelope? {
+        val raw = bytes.toString(Charsets.UTF_8)
+        if (!raw.startsWith("sync1|")) return null
+        val body = raw.removePrefix("sync1|")
+        val split = body.indexOf('|')
+        if (split <= 0) return null
+        return runCatching {
+            SyncEnvelope(
+                body.substring(0, split),
+                android.util.Base64.decode(body.substring(split + 1), android.util.Base64.DEFAULT)
+            )
+        }.getOrNull()
+    }
+
+    private fun acknowledge(envelope: SyncEnvelope) {
+        Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
+            nodes.forEach { node ->
+                Wearable.getMessageClient(this)
+                    .sendMessage(node.id, "/pomodoro/sync_ack", envelope.id.toByteArray())
+                    .addOnFailureListener { error -> Log.e(TAG, "Failed to acknowledge sync item", error) }
+            }
+        }
+    }
+
+    private data class SyncEnvelope(val id: String, val payload: ByteArray)
 
     private fun requestOwnedComplicationUpdates() {
         val progressComponent = android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)

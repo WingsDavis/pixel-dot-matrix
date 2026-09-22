@@ -10,8 +10,8 @@ android {
         applicationId = "com.aistudio.panicpomodoro.watchface"
         minSdk = 34  // WFF v2 requires API 34+
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     buildTypes {

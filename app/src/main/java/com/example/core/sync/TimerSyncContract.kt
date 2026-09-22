@@ -14,7 +14,8 @@ data class TimerSnapshot(
     val secondsRemaining: Int,
     val isRunning: Boolean,
     val updatedAtEpochMs: Long,
-    val anchorElapsedRealtimeMs: Long
+    val anchorElapsedRealtimeMs: Long,
+    val leaseExpiresAtEpochMs: Long = 0L
 )
 
 data class TimerCommand(
@@ -73,4 +74,17 @@ object TimerSnapshotResolver {
         }
         return SnapshotResolution.Accept(incoming)
     }
+
+    fun remainingAt(snapshot: TimerSnapshot, nowEpochMs: Long, maxClockDriftMs: Long = 2_000L): Int {
+        if (!snapshot.isRunning) return snapshot.secondsRemaining.coerceAtLeast(0)
+        val elapsedMs = (nowEpochMs - snapshot.updatedAtEpochMs).coerceAtLeast(0L)
+        val boundedDriftMs = elapsedMs.coerceAtMost(maxClockDriftMs)
+        return (snapshot.secondsRemaining - (boundedDriftMs / 1_000L).toInt()).coerceAtLeast(0)
+    }
+
+    fun commandIsAcceptable(command: TimerCommand, currentRevision: Long): Boolean {
+        return command.baseRevision < 0L || command.baseRevision >= currentRevision - COMMAND_REVISION_TOLERANCE
+    }
+
+    private const val COMMAND_REVISION_TOLERANCE = 5L
 }

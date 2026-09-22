@@ -136,7 +136,9 @@
 
         <!-- Right Side: Stacked Time (Bold NDot, No Background) - Background Layer -->
         <Group name="TimeGroup" x="245" y="100" width="205" height="250">
-            <Variant mode="AMBIENT" target="x" value="145" />
+            <!-- Small ambient translation reduces static pixel retention. -->
+            <Variant mode="AMBIENT" target="x" value="140" />
+            <Variant mode="AMBIENT" target="y" value="104" />
             <!-- Force TimeGroup to always display in Ambient mode -->
             <Variant mode="AMBIENT" target="alpha" value="255" />
             <!-- Hide when active session exists in interactive mode -->
@@ -147,6 +149,7 @@
                 <Variant mode="AMBIENT" target="alpha" value="0" />
                 <Text align="CENTER">
                     <Font family="ndot" size="110" color="[CONFIGURATION.hour_color]">
+                        <Variant mode="AMBIENT" target="color" value="#ff777777" />
                         <Template>%s<Parameter expression="[HOUR_1_12_Z]" /></Template>
                     </Font>
                 </Text>
@@ -155,6 +158,7 @@
                 <Variant mode="AMBIENT" target="alpha" value="0" />
                 <Text align="CENTER">
                     <Font family="ndot" size="110" color="[CONFIGURATION.minute_color]">
+                        <Variant mode="AMBIENT" target="color" value="#ff777777" />
                         <Template>%s<Parameter expression="[MINUTE_Z]" /></Template>
                     </Font>
                 </Text>
@@ -561,6 +565,7 @@
 
 
         <!-- Seconds Arc (Right Edge) -->
+        <!-- Seconds are intentionally disabled in ambient mode for battery and burn-in safety. -->
         <Group name="SecondsArcGroup" x="0" y="0" width="450" height="450">
             <Variant mode="AMBIENT" target="alpha" value="0" />
             <PartDraw x="0" y="0" width="450" height="450">

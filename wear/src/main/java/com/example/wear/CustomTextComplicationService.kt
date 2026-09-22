@@ -41,6 +41,7 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
             leftSlotMode == "heart_rate" -> "$hr BPM"
             leftSlotMode == "next_break" -> state.toNextBreakText()
             leftSlotMode == "streak" -> "STREAK 0"
+            leftSlotMode == "daily_target" -> dailyTargetText(prefs)
             else -> customText.ifBlank { null }
         }
 
@@ -74,5 +75,11 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
             "PANIC_MODE" -> "RECOVER"
             else -> "NEXT BREAK"
         }
+    }
+
+    private fun dailyTargetText(prefs: SharedPreferences): String {
+        val focused = prefs.getInt("daily_focus_minutes", 0).coerceAtLeast(0)
+        val target = prefs.getInt("daily_target_minutes", 120).coerceAtLeast(1)
+        return "${focused.coerceAtMost(target)}/${target}m"
     }
 }

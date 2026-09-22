@@ -18,6 +18,8 @@ import com.example.core.sync.WearableSyncManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.Uri
 import android.util.Log
 import java.io.ByteArrayOutputStream
@@ -52,6 +54,8 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val wearableSyncManager = WearableSyncManager(application, viewModelScope, engine)
     val watchFaceSyncStatus = wearableSyncManager.watchFaceSyncStatus
     val watchFaceConfig = wearableSyncManager.watchFaceConfig
+    val watchFacePresets = wearableSyncManager.watchFacePresets
+    val watchFaceRecentColors = wearableSyncManager.watchFaceRecentColors
     val syncOutboxItems = wearableSyncManager.syncOutboxItems
 
     // Step Counter state
@@ -341,6 +345,12 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         wearableSyncManager.applyWatchFacePreset(id)
     }
 
+    fun saveWatchFacePreset(name: String, config: com.example.core.sync.WatchFaceConfig) = wearableSyncManager.saveWatchFacePreset(name, config)
+    fun duplicateWatchFacePreset(id: String, name: String) = wearableSyncManager.duplicateWatchFacePreset(id, name)
+    fun renameWatchFacePreset(id: String, name: String) = wearableSyncManager.renameWatchFacePreset(id, name)
+    fun deleteWatchFacePreset(id: String) = wearableSyncManager.deleteWatchFacePreset(id)
+    fun rememberWatchFaceColor(hex: String) = wearableSyncManager.rememberWatchFaceColor(hex)
+
     fun resetWatchFace() {
         wearableSyncManager.resetWatchFaceConfig()
     }
@@ -366,10 +376,31 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
                     output.toByteArray()
                 }
-                wearableSyncManager.pushWatchFaceLogo(bytes)
+                syncWatchFaceLogo(source, 1f, 0f, 0f)
             } catch (e: Exception) {
                 Log.e("PomodoroViewModel", "Failed to prepare custom watch face logo", e)
             }
+        }
+    }
+
+    fun syncWatchFaceLogo(source: Bitmap, zoom: Float, offsetX: Float, offsetY: Float) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val side = minOf(source.width, source.height)
+                val square = Bitmap.createBitmap(source, (source.width - side) / 2, (source.height - side) / 2, side, side)
+                val output = Bitmap.createBitmap(WATCH_FACE_LOGO_SIZE, WATCH_FACE_LOGO_SIZE, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(output)
+                val scaledSide = (WATCH_FACE_LOGO_SIZE * zoom.coerceIn(1f, 2f)).toInt()
+                val scaled = Bitmap.createScaledBitmap(square, scaledSide, scaledSide, true)
+                val left = (WATCH_FACE_LOGO_SIZE - scaledSide) / 2f + offsetX.coerceIn(-0.3f, 0.3f) * WATCH_FACE_LOGO_SIZE
+                val top = (WATCH_FACE_LOGO_SIZE - scaledSide) / 2f + offsetY.coerceIn(-0.3f, 0.3f) * WATCH_FACE_LOGO_SIZE
+                canvas.drawBitmap(scaled, left, top, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                val bytes = ByteArrayOutputStream().use { outputStream ->
+                    output.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                    outputStream.toByteArray()
+                }
+                wearableSyncManager.pushWatchFaceLogo(bytes)
+            }.onFailure { error -> Log.e("PomodoroViewModel", "Failed to sync transformed logo", error) }
         }
     }
 

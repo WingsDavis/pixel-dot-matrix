@@ -12,6 +12,11 @@ class WearHaptics(context: Context) {
     private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     private val prefs = context.getSharedPreferences("wear_haptics", Context.MODE_PRIVATE)
     private val lastPlayed = mutableMapOf<WearHapticPattern, Long>()
+    val isEnabled: Boolean get() = prefs.getBoolean("enabled", true)
+    val intensity: Int get() = prefs.getInt("intensity", 160)
+
+    fun setEnabled(enabled: Boolean) = prefs.edit().putBoolean("enabled", enabled).apply()
+    fun setIntensity(value: Int) = prefs.edit().putInt("intensity", value.coerceIn(32, 255)).apply()
 
     fun play(pattern: WearHapticPattern, intensityOverride: Int? = null) {
         if (!prefs.getBoolean("enabled", true) || !vibrator.hasVibrator()) return

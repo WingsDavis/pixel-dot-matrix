@@ -21,6 +21,8 @@ data class SyncOutboxEntity(
 ) {
     companion object {
         const val STATUS_PENDING = "PENDING"
+        const val STATUS_SENT = "SENT"
+        const val STATUS_APPLIED = "APPLIED"
         const val STATUS_DELIVERED = "DELIVERED"
         const val STATUS_FAILED = "FAILED"
     }

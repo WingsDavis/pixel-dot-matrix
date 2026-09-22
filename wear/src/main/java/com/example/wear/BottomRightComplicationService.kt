@@ -38,6 +38,7 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
             "phase" -> state.toDisplayText()
             "timer" -> if (isRunning || state == "PANIC_MODE") secondsRemaining.toClockText() else "IDLE"
             "battery" -> "WATCH"
+            "daily_target" -> dailyTargetText(syncPrefs)
             else -> SimpleDateFormat("EEE dd", Locale.getDefault()).format(Date()).uppercase(Locale.getDefault())
         }
 
@@ -63,5 +64,11 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
         val minutes = this / 60
         val seconds = this % 60
         return "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun dailyTargetText(prefs: android.content.SharedPreferences): String {
+        val focused = prefs.getInt("daily_focus_minutes", 0).coerceAtLeast(0)
+        val target = prefs.getInt("daily_target_minutes", 120).coerceAtLeast(1)
+        return "${focused.coerceAtMost(target)}/${target}m"
     }
 }

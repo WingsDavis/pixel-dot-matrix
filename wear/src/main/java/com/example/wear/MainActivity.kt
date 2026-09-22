@@ -322,6 +322,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         }
                         4 -> {
                             WearQuickActions(
+                                haptics = wearHaptics,
                                 onFocus = { sendMessageToPhone("/pomodoro/control", "START_FOCUS") },
                                 onBreak = { sendMessageToPhone("/pomodoro/control", "START_SHORT_BREAK") },
                                 onDistraction = { sendMessageToPhone("/incident/mark", "DISTRACTION") }
@@ -354,6 +355,12 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         // Register wearable listeners
         dataClient.addListener(this)
         messageClient.addListener(this)
+        activityScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                commandOutbox.flush()
+                delay(15_000L)
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -691,6 +698,7 @@ fun FrustrationWarningScreen(
 
 @Composable
 private fun WearQuickActions(
+    haptics: WearHaptics,
     onFocus: () -> Unit,
     onBreak: () -> Unit,
     onDistraction: () -> Unit
@@ -722,6 +730,41 @@ private fun WearQuickActions(
         DotMatrixActionButton("BREAK", Icons.Default.Coffee, Color(0xFFFFCA28), onBreak)
         Spacer(Modifier.height(7.dp))
         DotMatrixActionButton("DISTRACTION", Icons.Default.Report, PanicRed, onDistraction)
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = { haptics.setEnabled(!haptics.isEnabled) },
+                modifier = Modifier.weight(1f).height(34.dp),
+                shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (haptics.isEnabled) TealAccent.copy(alpha = 0.25f) else CardWhite.copy(alpha = 0.12f),
+                    contentColor = CardWhite
+                )
+            ) {
+                Text(if (haptics.isEnabled) "HAPTIC ON" else "HAPTIC OFF", fontFamily = DotMatrixFont, fontSize = 10.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+            Text("${haptics.intensity}", fontFamily = DotMatrixFont, fontSize = 11.sp, color = CardWhite.copy(alpha = 0.65f))
+            WearBentoIconButton(
+                onClick = { haptics.setIntensity(haptics.intensity - 32) },
+                modifier = Modifier.size(30.dp),
+                color = CardWhite.copy(alpha = 0.14f),
+                contentColor = CardWhite
+            ) { Icon(Icons.Default.Remove, contentDescription = "Lower haptic intensity", modifier = Modifier.size(14.dp)) }
+            WearBentoIconButton(
+                onClick = { haptics.setIntensity(haptics.intensity + 32) },
+                modifier = Modifier.size(30.dp),
+                color = CardWhite.copy(alpha = 0.14f),
+                contentColor = CardWhite
+            ) { Icon(Icons.Default.Add, contentDescription = "Raise haptic intensity", modifier = Modifier.size(14.dp)) }
+        }
+        DotMatrixActionButton("TEST HAPTIC", Icons.Default.Vibration, TealAccent) {
+            haptics.play(WearHapticPattern.SUCCESS)
+        }
     }
 }
 

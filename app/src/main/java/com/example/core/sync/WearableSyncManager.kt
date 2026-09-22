@@ -41,6 +41,8 @@ class WearableSyncManager(
 ) : DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener {
     private val watchFaceConfigStore = WatchFaceConfigStore(context)
     val watchFaceConfig = watchFaceConfigStore.config
+    val watchFacePresets = watchFaceConfigStore.presets
+    val watchFaceRecentColors = watchFaceConfigStore.recentColors
     val syncOutboxItems by lazy { AppDatabase.getDatabase(context).syncOutboxDao().observeAll() }
 
     private val dataClient: DataClient by lazy { Wearable.getDataClient(context) }
@@ -69,6 +71,7 @@ class WearableSyncManager(
         dataClient.addListener(this)
         messageClient.addListener(this)
         scope.launch(Dispatchers.IO) { syncOutbox.flush() }
+        scope.launch(Dispatchers.IO) { replayStoredWatchFaceConfig() }
         scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(OUTBOX_RETRY_INTERVAL_MS)
@@ -90,6 +93,7 @@ class WearableSyncManager(
                 }
                 currentSnapshot = createTimerSnapshot(timerRevision.incrementAndGet())
                 val isPanic = engine.currentState.value == PomodoroState.PANIC_MODE
+                val goalPrefs = context.getSharedPreferences("focus_goal_prefs", Context.MODE_PRIVATE)
                 val request = PutDataMapRequest.create(PATH_POMODORO_STATE).apply {
                     dataMap.putString(KEY_STATE, engine.currentState.value.name)
                     dataMap.putString(KEY_CURRENT_PHASE, engine.currentState.value.name)
@@ -101,6 +105,9 @@ class WearableSyncManager(
                     dataMap.putString(KEY_SOURCE_DEVICE, currentSnapshot.sourceDevice)
                     dataMap.putString(KEY_AUTHORITY, currentSnapshot.authority.name)
                     dataMap.putLong(KEY_ANCHOR_ELAPSED_REALTIME, currentSnapshot.anchorElapsedRealtimeMs)
+                    dataMap.putLong(KEY_LEASE_EXPIRES_AT, currentSnapshot.leaseExpiresAtEpochMs)
+                    dataMap.putInt("daily_focus_minutes", goalPrefs.getInt("daily_focus_minutes", 0))
+                    dataMap.putInt("daily_target_minutes", goalPrefs.getInt("daily_target_minutes", 120))
                     // Ensure the update is always detected even if primitive values are same
                     dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
                 }.asPutDataRequest()
@@ -299,19 +306,24 @@ class WearableSyncManager(
                             secondsRemaining = seconds,
                             isRunning = isRunning,
                             updatedAtEpochMs = dataMap.getLong(KEY_TIMESTAMP, 0L),
-                            anchorElapsedRealtimeMs = dataMap.getLong(KEY_ANCHOR_ELAPSED_REALTIME, 0L)
+                            anchorElapsedRealtimeMs = dataMap.getLong(KEY_ANCHOR_ELAPSED_REALTIME, 0L),
+                            leaseExpiresAtEpochMs = dataMap.getLong(KEY_LEASE_EXPIRES_AT, 0L)
                         )
                         val resolution = TimerSnapshotResolver.resolve(
                             local = currentSnapshot,
                             incoming = incoming,
-                            wearLeaseExpiresAtEpochMs = 0L,
+                            wearLeaseExpiresAtEpochMs = incoming.leaseExpiresAtEpochMs,
                             nowEpochMs = System.currentTimeMillis()
                         )
                         if (resolution is SnapshotResolution.Accept) {
                             currentSnapshot = resolution.snapshot
                             timerRevision.set(maxOf(timerRevision.get(), incoming.revision))
                             scope.launch(Dispatchers.Main) {
-                                engine.syncState(state, seconds, isRunning)
+                                val reconciledSeconds = TimerSnapshotResolver.remainingAt(
+                                    incoming,
+                                    System.currentTimeMillis()
+                                )
+                                engine.syncState(state, reconciledSeconds, isRunning)
                             }
                         } else if (resolution is SnapshotResolution.Reject) {
                             Log.d(TAG, "Rejected Wear snapshot revision=${incoming.revision}: ${resolution.reason}")
@@ -347,6 +359,10 @@ class WearableSyncManager(
      */
     override fun onMessageReceived(messageEvent: MessageEvent) {
         when (messageEvent.path) {
+            PATH_SYNC_ACK -> {
+                val id = String(messageEvent.data, StandardCharsets.UTF_8)
+                scope.launch(Dispatchers.IO) { syncOutbox.markApplied(id) }
+            }
             PATH_PANIC_TRIGGER -> {
                 scope.launch(Dispatchers.Main) {
                     engine.triggerPanic()
@@ -364,6 +380,10 @@ class WearableSyncManager(
             PATH_POMODORO_CONTROL -> {
                 val command = TimerCommand.decode(messageEvent.data) ?: return
                 scope.launch(Dispatchers.Main) {
+                    if (!TimerSnapshotResolver.commandIsAcceptable(command, timerRevision.get())) {
+                        Log.d(TAG, "Rejected stale timer command id=${command.id} base=${command.baseRevision} current=${timerRevision.get()}")
+                        return@launch
+                    }
                     if (!markCommandHandled(command.id)) return@launch
                     when (command.action) {
                         "START" -> engine.start()
@@ -410,12 +430,45 @@ class WearableSyncManager(
     }
 
     fun applyWatchFacePreset(id: String) {
-        WatchFaceConfigStore.BUILT_IN_PRESETS[id]?.let(watchFaceConfigStore::save)
+        watchFaceConfigStore.preset(id)?.config?.let(watchFaceConfigStore::save)
     }
 
+    fun saveWatchFacePreset(name: String, config: WatchFaceConfig) = watchFaceConfigStore.savePreset(name, config)
+    fun duplicateWatchFacePreset(id: String, name: String) = watchFaceConfigStore.duplicatePreset(id, name)
+    fun renameWatchFacePreset(id: String, name: String) = watchFaceConfigStore.renamePreset(id, name)
+    fun deleteWatchFacePreset(id: String) = watchFaceConfigStore.deletePreset(id)
+    fun rememberWatchFaceColor(hex: String) = watchFaceConfigStore.rememberColor(hex)
+
     fun resetWatchFaceConfig() {
-        watchFaceConfigStore.reset()
+        val defaults = watchFaceConfigStore.reset()
         resetWatchFaceLogo()
+        pushWatchFaceConfig(
+            timerColor = defaults.hourColor,
+            secondsColor = defaults.secondColor,
+            idleTimeColor = defaults.minuteColor,
+            customText = defaults.customText,
+            leftSlotMode = "custom_text",
+            bottomRightSlotMode = "date",
+            showPanicLogo = defaults.showLogo,
+            ambientStyle = "dim",
+            themePreset = defaults.preset
+        )
+    }
+
+    private fun replayStoredWatchFaceConfig() {
+        val config = watchFaceConfigStore.config.value
+        if (config.localRevision == null) return
+        pushWatchFaceConfig(
+            timerColor = config.hourColor,
+            secondsColor = config.secondColor,
+            idleTimeColor = config.minuteColor,
+            customText = config.customText,
+            leftSlotMode = "custom_text",
+            bottomRightSlotMode = "date",
+            showPanicLogo = config.showLogo,
+            ambientStyle = "dim",
+            themePreset = config.preset
+        )
     }
 
     private fun createTimerSnapshot(revision: Long) = TimerSnapshot(
@@ -453,6 +506,7 @@ class WearableSyncManager(
         const val PATH_WATCHFACE_STATUS_V2 = "/pomodoro/watchface/status/v2"
         const val PATH_WATCHFACE_LOGO_V1 = "/pomodoro/watchface/logo/v1"
         const val PATH_CUSTOM_TEXT = "/pomodoro/custom_text"
+        const val PATH_SYNC_ACK = "/pomodoro/sync_ack"
 
         const val WATCHFACE_CONFIG_SCHEMA_VERSION = 2
 
@@ -484,6 +538,7 @@ class WearableSyncManager(
         const val KEY_SESSION_ID = "session_id"
         const val KEY_AUTHORITY = "authority"
         const val KEY_ANCHOR_ELAPSED_REALTIME = "anchor_elapsed_realtime"
+        const val KEY_LEASE_EXPIRES_AT = "lease_expires_at"
         const val SOURCE_PHONE = "phone"
         const val SOURCE_WEAR = "wear"
         private const val MAX_HANDLED_COMMANDS = 256
