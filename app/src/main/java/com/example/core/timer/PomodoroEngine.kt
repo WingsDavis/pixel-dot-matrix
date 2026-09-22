@@ -10,12 +10,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class PomodoroEngine(
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    initialSettings: TimerSettings = TimerSettings()
 ) {
-    // Configurable Durations (in seconds)
-    var focusDuration = 25 * 60
-    var shortBreakDuration = 5 * 60
-    var longBreakDuration = 15 * 60
+    var focusDuration = initialSettings.focusDurationSeconds
+        private set
+    var shortBreakDuration = initialSettings.shortBreakDurationSeconds
+        private set
+    var longBreakDuration = initialSettings.longBreakDurationSeconds
+        private set
+    var longBreakCadence = initialSettings.longBreakCadence
+        private set
 
     private val _currentState = MutableStateFlow(PomodoroState.FOCUS)
     val currentState: StateFlow<PomodoroState> = _currentState.asStateFlow()
@@ -49,6 +54,14 @@ class PomodoroEngine(
         pause()
         _currentState.value = PomodoroState.FOCUS
         _secondsRemaining.value = focusDuration
+    }
+
+    fun applySettings(settings: TimerSettings, resetTimer: Boolean = false) {
+        focusDuration = settings.focusDurationSeconds
+        shortBreakDuration = settings.shortBreakDurationSeconds
+        longBreakDuration = settings.longBreakDurationSeconds
+        longBreakCadence = settings.longBreakCadence
+        if (resetTimer) reset()
     }
 
     fun skip() {
@@ -109,7 +122,7 @@ class PomodoroEngine(
         when (_currentState.value) {
             PomodoroState.FOCUS -> {
                 completedFocusSessions++
-                if (completedFocusSessions >= 4) {
+                if (completedFocusSessions >= longBreakCadence) {
                     _currentState.value = PomodoroState.LONG_BREAK
                     _secondsRemaining.value = longBreakDuration
                     completedFocusSessions = 0

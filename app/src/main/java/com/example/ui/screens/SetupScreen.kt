@@ -50,10 +50,10 @@ fun SetupScreen(
     val isDnsActive by viewModel.isDnsSinkholeActive.collectAsState()
     var deleteTarget by remember { mutableStateOf<String?>(null) }
 
-    // Timer durations config state
-    var focusMin by remember { mutableStateOf(viewModel.engine.focusDuration / 60) }
-    var breakMin by remember { mutableStateOf(viewModel.engine.shortBreakDuration / 60) }
-    var longBreakMin by remember { mutableStateOf(viewModel.engine.longBreakDuration / 60) }
+    val timerSettings by viewModel.timerSettings.collectAsState()
+    val focusMin = timerSettings.focusDurationSeconds / 60
+    val breakMin = timerSettings.shortBreakDurationSeconds / 60
+    val longBreakMin = timerSettings.longBreakDurationSeconds / 60
 
     // Overlay permission state
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
@@ -195,9 +195,7 @@ fun SetupScreen(
                     Slider(
                         value = focusMin.toFloat(),
                         onValueChange = {
-                            focusMin = it.toInt()
-                            viewModel.engine.focusDuration = focusMin * 60
-                            viewModel.engine.reset() // reset to reflect new duration
+                            viewModel.setFocusDurationMinutes(it.toInt())
                         },
                         valueRange = 1f..60f,
                         colors = SliderDefaults.colors(
@@ -220,9 +218,7 @@ fun SetupScreen(
                     Slider(
                         value = breakMin.toFloat(),
                         onValueChange = {
-                            breakMin = it.toInt()
-                            viewModel.engine.shortBreakDuration = breakMin * 60
-                            viewModel.engine.reset() // reset to reflect new duration
+                            viewModel.setShortBreakDurationMinutes(it.toInt())
                         },
                         valueRange = 1f..25f,
                         colors = SliderDefaults.colors(
@@ -245,9 +241,7 @@ fun SetupScreen(
                     Slider(
                         value = longBreakMin.toFloat(),
                         onValueChange = {
-                            longBreakMin = it.toInt()
-                            viewModel.engine.longBreakDuration = longBreakMin * 60
-                            viewModel.engine.reset()
+                            viewModel.setLongBreakDurationMinutes(it.toInt())
                         },
                         valueRange = 5f..45f,
                         colors = SliderDefaults.colors(
@@ -257,6 +251,38 @@ fun SetupScreen(
                         )
                     )
                 }
+
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "Long Break Every", fontSize = 13.sp, color = CardBlack.copy(alpha = 0.7f))
+                        Text(text = "${timerSettings.longBreakCadence} sessions", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = CardBlack)
+                    }
+                    Slider(
+                        value = timerSettings.longBreakCadence.toFloat(),
+                        onValueChange = { viewModel.setLongBreakCadence(it.toInt()) },
+                        valueRange = 2f..8f,
+                        steps = 5,
+                        colors = SliderDefaults.colors(
+                            thumbColor = CardBlack,
+                            activeTrackColor = TealAccent,
+                            inactiveTrackColor = CardBlack.copy(alpha = 0.1f)
+                        )
+                    )
+                }
+
+                TimerPreferenceSwitch(
+                    title = "Auto-start Breaks",
+                    checked = timerSettings.autoStartBreaks,
+                    onCheckedChange = viewModel::setAutoStartBreaks
+                )
+                TimerPreferenceSwitch(
+                    title = "Auto-start Focus",
+                    checked = timerSettings.autoStartFocus,
+                    onCheckedChange = viewModel::setAutoStartFocus
+                )
             }
         }
 
@@ -410,5 +436,21 @@ fun SetupScreen(
         }
 
         Spacer(modifier = Modifier.height(100.dp))
+    }
+}
+
+@Composable
+private fun TimerPreferenceSwitch(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = title, fontSize = 13.sp, color = CardBlack)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -10,6 +10,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
+import com.example.core.timer.TimerSettings
+import com.example.core.timer.TimerSettingsStore
 import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
 import com.example.data.entity.IncidentStatus
@@ -35,6 +37,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 import com.example.core.protection.DomainProfileStore
 
 class PomodoroViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
@@ -42,6 +46,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val database = AppDatabase.getDatabase(application)
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
     private val domainProfiles = DomainProfileStore(application)
+    private val timerSettingsStore = TimerSettingsStore(application)
+    private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
+    private val timerSettingsUpdates = Channel<TimerSettings>(Channel.CONFLATED)
 
     val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -49,7 +56,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     val panicLogs: StateFlow<List<PanicLogEntity>> = repository.allPanicLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val engine = PomodoroEngine(viewModelScope)
+    val engine = PomodoroEngine(viewModelScope, initialTimerSettings)
+
+    private val _timerSettings = MutableStateFlow(initialTimerSettings)
+    val timerSettings: StateFlow<TimerSettings> = _timerSettings.asStateFlow()
 
     val currentState: StateFlow<PomodoroState> = engine.currentState
     val secondsRemaining: StateFlow<Int> = engine.secondsRemaining
@@ -121,6 +131,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private var initialStepCount = -1f
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (settings in timerSettingsUpdates) timerSettingsStore.write(settings)
+        }
+
         // Check for pending audits
         viewModelScope.launch {
             val pendingAudit = repository.getPendingAuditLog()
@@ -217,6 +231,43 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     fun pauseTimer() = engine.pause()
     fun resetTimer() = engine.reset()
     fun skipTimer() = engine.skip()
+
+    fun setFocusDurationMinutes(minutes: Int) = updateTimerSetting(
+        _timerSettings.value.copy(focusDurationSeconds = minutes * 60),
+        resetTimer = true
+    )
+
+    fun setShortBreakDurationMinutes(minutes: Int) = updateTimerSetting(
+        _timerSettings.value.copy(shortBreakDurationSeconds = minutes * 60),
+        resetTimer = true
+    )
+
+    fun setLongBreakDurationMinutes(minutes: Int) = updateTimerSetting(
+        _timerSettings.value.copy(longBreakDurationSeconds = minutes * 60),
+        resetTimer = true
+    )
+
+    fun setLongBreakCadence(cadence: Int) = updateTimerSetting(
+        _timerSettings.value.copy(longBreakCadence = cadence),
+        resetTimer = false
+    )
+
+    fun setAutoStartBreaks(enabled: Boolean) = updateTimerSetting(
+        _timerSettings.value.copy(autoStartBreaks = enabled),
+        resetTimer = false
+    )
+
+    fun setAutoStartFocus(enabled: Boolean) = updateTimerSetting(
+        _timerSettings.value.copy(autoStartFocus = enabled),
+        resetTimer = false
+    )
+
+    private fun updateTimerSetting(settings: TimerSettings, resetTimer: Boolean) {
+        val sanitized = settings.sanitized()
+        _timerSettings.value = sanitized
+        engine.applySettings(sanitized, resetTimer)
+        timerSettingsUpdates.trySend(sanitized)
+    }
 
     fun setTimerState(state: PomodoroState) {
         val duration = when (state) {

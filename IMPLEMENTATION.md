@@ -131,6 +131,17 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - Arc and control buttons dynamically shift colors to match the session state (Focus = Blue, Short Break = Yellow, Long Break = Green).
   - Timer typography scaled up to a massive size in the center of the watch face, utilizing negative space with cleanly centralized Play/Pause/Skip buttons.
 
+### Feature 8: Durable Timer Preferences
+* **Settings storage (`TimerSettingsStore.kt`)**:
+  - Stores focus, short-break, and long-break durations, long-break cadence, and both auto-start preferences in Preferences DataStore.
+  - Uses schema version 1 and replaces missing, legacy, or out-of-range values with bounded defaults while preserving valid preferences.
+  - Writes the latest complete timer snapshot through a conflated queue so rapid slider changes do not change unrelated DataStore keys.
+* **Startup and UI (`PomodoroViewModel.kt` and `SetupScreen.kt`)**:
+  - Loads and migrates timer settings before constructing `PomodoroEngine`, so the first timer and Settings composition use persisted values.
+  - Exposes duration, cadence, and automation controls from one observable settings state.
+  - Applies the configured long-break cadence in the timer engine instead of a hardcoded four-session interval.
+  - Auto-start preferences are persisted here; transition behavior is tracked separately under roadmap item 5.
+
 ---
 
 ## 3. Development Reference

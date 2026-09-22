@@ -1,6 +1,6 @@
 # Pixel Dot Matrix Feature Roadmap
 
-Last updated: 2026-07-10
+Last updated: 2026-09-22
 
 This roadmap tracks the 20 planned product improvements across the mobile app,
 Wear app, Watch Face Format bundle, synchronization layer, and local data model.
@@ -20,18 +20,18 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
-| 1. State and reliability | 1-5 | 0 | 3 | 0 | 2 |
+| 1. State and reliability | 1-5 | 1 | 3 | 0 | 1 |
 | 2. Phone productivity | 6-10 | 0 | 1 | 0 | 4 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **0** | **13** | **0** | **7** |
+| **Total** | **20** | **1** | **13** | **0** | **6** |
 
 ## Master Tracker
 
 | ID | Feature | Priority | Status | Depends on |
 |---:|---|---|---|---|
-| 1 | Persist timer settings | P0 | `[ ]` | None |
+| 1 | Persist timer settings | P0 | `[x]` | None |
 | 2 | Shared timer authority | P0 | `[~]` | 1 |
 | 3 | Reliable offline synchronization | P0 | `[~]` | 2 |
 | 4 | Watch-face configuration persistence | P0 | `[~]` | 1, 3 |
@@ -54,7 +54,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 ## Phase 1: State and Reliability
 
-### 1. Persist Timer Settings `[ ]`
+### 1. Persist Timer Settings `[x]`
 
 **Scope**
 - Add mobile DataStore preferences for focus duration, short break duration,
@@ -64,10 +64,10 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Add a schema version and migration path from current in-memory defaults.
 
 **Acceptance criteria**
-- [ ] All durations survive process death, reboot, and application updates.
-- [ ] Invalid or old values migrate to safe bounded defaults.
-- [ ] Unit tests cover defaults, writes, reads, and migration.
-- [ ] Settings UI reflects persisted values on first composition.
+- [x] All durations survive process death, reboot, and application updates.
+- [x] Invalid or old values migrate to safe bounded defaults.
+- [x] Unit tests cover defaults, writes, reads, and migration.
+- [x] Settings UI reflects persisted values on first composition.
 
 ### 2. Shared Timer Authority `[~]`
 
