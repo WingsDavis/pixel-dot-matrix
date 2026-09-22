@@ -48,8 +48,24 @@ class TimerSyncContractTest {
 
     @Test
     fun phoneAcceptsNewerWearSnapshotWithActiveLease() {
-        val incoming = snapshot(5, "wear", TimerAuthority.WEAR)
+        val incoming = snapshot(5, "wear", TimerAuthority.WEAR).copy(leaseExpiresAtEpochMs = 20)
         val result = TimerSnapshotResolver.resolve(snapshot(4, "phone"), incoming, 20, 10)
         assertEquals(incoming, (result as SnapshotResolution.Accept).snapshot)
+    }
+
+    @Test
+    fun expiredLeaseCannotReplacePhoneSnapshot() {
+        val incoming = snapshot(5, "wear", TimerAuthority.WEAR).copy(leaseExpiresAtEpochMs = 9)
+        val result = TimerSnapshotResolver.resolve(snapshot(4, "phone"), incoming, 9, 10)
+        assertEquals("phone_authoritative", (result as SnapshotResolution.Reject).reason)
+    }
+
+    @Test
+    fun simultaneousCommandsHaveOneCanonicalWinner() {
+        val first = TimerCommand(id = "a", action = "START", baseRevision = 10)
+        val simultaneous = TimerCommand(id = "b", action = "PAUSE", baseRevision = 10)
+
+        assertTrue(TimerSnapshotResolver.commandIsAcceptable(first, 10))
+        assertTrue(!TimerSnapshotResolver.commandIsAcceptable(simultaneous, 11))
     }
 }

@@ -12,6 +12,8 @@ import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
 import com.example.core.timer.TimerSettings
 import com.example.core.timer.TimerSettingsStore
+import com.example.core.sync.TimerSnapshotResolver
+import com.example.core.sync.TimerSnapshotStore
 import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
 import com.example.data.entity.IncidentStatus
@@ -48,6 +50,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
     private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
+    private val restoredTimerSnapshot = TimerSnapshotStore(application).load()
     private val timerSettingsUpdates = Channel<TimerSettings>(Channel.CONFLATED)
 
     val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
@@ -56,7 +59,15 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     val panicLogs: StateFlow<List<PanicLogEntity>> = repository.allPanicLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val engine = PomodoroEngine(viewModelScope, initialTimerSettings)
+    val engine = PomodoroEngine(viewModelScope, initialTimerSettings).apply {
+        restoredTimerSnapshot?.let { snapshot ->
+            syncState(
+                snapshot.state,
+                TimerSnapshotResolver.remainingAt(snapshot, System.currentTimeMillis()),
+                snapshot.isRunning
+            )
+        }
+    }
 
     private val _timerSettings = MutableStateFlow(initialTimerSettings)
     val timerSettings: StateFlow<TimerSettings> = _timerSettings.asStateFlow()

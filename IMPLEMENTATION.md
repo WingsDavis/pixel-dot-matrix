@@ -142,6 +142,21 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - Applies the configured long-break cadence in the timer engine instead of a hardcoded four-session interval.
   - Auto-start preferences are persisted here; transition behavior is tracked separately under roadmap item 5.
 
+### Feature 9: Shared Timer Authority
+* **Versioned state contract (`TimerSyncContract.kt`)**:
+  - Timer snapshots include revision, session ID, source node, authority, phase, remaining time, running state, wall-clock update time, monotonic anchor, and Wear lease expiry.
+  - The phone accepts only newer Wear snapshots with a live lease and rejects echoes, stale snapshots, expired leases, and commands based on an old revision.
+  - Running snapshots reconcile the full elapsed interval while guarding against clocks that are unexpectedly ahead.
+* **Phone authority (`WearableSyncManager.kt` and `TimerSnapshotStore.kt`)**:
+  - The phone persists its last authoritative snapshot and hydrates `PomodoroEngine` from it after process recreation.
+  - Revisions advance for commands and meaningful state changes rather than every timer tick; elapsed time is derived from the snapshot anchor.
+  - Accepted standalone Wear state is immediately republished at a newer phone-owned revision so both devices converge on one state.
+* **Standalone Wear lease (`MainActivity.kt`)**:
+  - When no phone node is connected, watch controls apply locally under a renewable two-hour lease and publish a persistent Wear snapshot.
+  - The watch restores and advances a running leased timer after process recreation, then publishes it when connectivity returns.
+  - Phone-owned timers count down locally on the watch from their timestamp, keeping the UI and complications current without one Data Layer write per second.
+  - Timer commands use unique IDs, so repeated actions remain valid while duplicate delivery stays identifiable.
+
 ---
 
 ## 3. Development Reference

@@ -9,6 +9,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
@@ -72,6 +73,15 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private val _secondsRemaining = mutableStateOf(1500)
     private val _isRunning = mutableStateOf(false)
     private var timerRevision = -1L
+    private var timerSessionId = UUID.randomUUID().toString()
+    private var timerUpdatedAtEpochMs = 0L
+    private var wearLeaseExpiresAtEpochMs = 0L
+    private var hasWearAuthority = false
+    @Volatile
+    private var lastStandalonePublishAtEpochMs = 0L
+    private var focusDuration = 1500
+    private var shortBreakDuration = 300
+    private var longBreakDuration = 900
 
     // Wear Local Biometrics
     private val _heartRate = mutableStateOf(74)
@@ -88,6 +98,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        restoreTimerState()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
@@ -123,6 +135,24 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val heartRateThreshold by _heartRateThreshold
                 val stepsTakenInPanic by _stepsTakenInPanic
                 val isFrustrated by _isFrustrated
+
+                LaunchedEffect(isRunning, stateName) {
+                    while (isRunning && stateName != "PANIC_MODE" && _secondsRemaining.value > 0) {
+                        delay(1_000L)
+                        if (_isRunning.value) {
+                            _secondsRemaining.value = (_secondsRemaining.value - 1).coerceAtLeast(0)
+                            if (_secondsRemaining.value == 0) _isRunning.value = false
+                            if (hasWearAuthority) {
+                                timerUpdatedAtEpochMs = System.currentTimeMillis()
+                                timerRevision = maxOf(timerRevision + 1, timerUpdatedAtEpochMs)
+                                saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
+                                if (timerUpdatedAtEpochMs - lastStandalonePublishAtEpochMs >= STANDALONE_PUBLISH_INTERVAL_MS || !_isRunning.value) {
+                                    activityScope.launch(Dispatchers.IO) { publishWearSnapshot() }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Manage haptic feedback loop in PANIC_MODE or Frustrated Mode
                 LaunchedEffect(stateName, isFrustrated) {
@@ -195,7 +225,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     FrustrationWarningScreen(
                         heartRate = heartRate,
                         onTakeBreak = {
-                            sendMessageToPhone("/pomodoro/control", "START_SHORT_BREAK")
+                            sendTimerCommand("START_SHORT_BREAK")
                             _isFrustrated.value = false
                         },
                         onDismiss = {
@@ -323,8 +353,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         4 -> {
                             WearQuickActions(
                                 haptics = wearHaptics,
-                                onFocus = { sendMessageToPhone("/pomodoro/control", "START_FOCUS") },
-                                onBreak = { sendMessageToPhone("/pomodoro/control", "START_SHORT_BREAK") },
+                                onFocus = { sendTimerCommand("START_FOCUS") },
+                                onBreak = { sendTimerCommand("START_SHORT_BREAK") },
                                 onDistraction = { sendMessageToPhone("/incident/mark", "DISTRACTION") }
                             )
                         }
@@ -358,6 +388,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         activityScope.launch(Dispatchers.IO) {
             while (isActive) {
                 commandOutbox.flush()
+                if (hasWearAuthority && runCatching { Tasks.await(nodeClient.connectedNodes).isNotEmpty() }.getOrDefault(false)) {
+                    publishWearSnapshot()
+                }
                 delay(15_000L)
             }
         }
@@ -385,15 +418,15 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 else -> "START"
             }
         }
-        sendMessageToPhone("/pomodoro/control", action)
+        sendTimerCommand(action)
     }
 
     private fun skipTimerOnPhone() {
-        sendMessageToPhone("/pomodoro/control", "SKIP")
+        sendTimerCommand("SKIP")
     }
 
     private fun resetTimerOnPhone() {
-        sendMessageToPhone("/pomodoro/control", "RESET")
+        sendTimerCommand("RESET")
     }
 
     private fun triggerPanicOnPhone() {
@@ -420,6 +453,76 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         }
     }
 
+    private fun sendTimerCommand(action: String) {
+        activityScope.launch(Dispatchers.IO) {
+            val connected = runCatching { Tasks.await(nodeClient.connectedNodes).isNotEmpty() }.getOrDefault(false)
+            if (connected) {
+                commandOutbox.sendOrQueue("/pomodoro/control", action, timerRevision)
+            } else {
+                withContext(Dispatchers.Main) { applyStandaloneAction(action) }
+                publishWearSnapshot()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Running on watch until phone reconnects", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun applyStandaloneAction(action: String) {
+        val previousState = _stateName.value
+        when (action) {
+            "START" -> _isRunning.value = true
+            "PAUSE" -> _isRunning.value = false
+            "RESET" -> {
+                _stateName.value = "FOCUS"
+                _secondsRemaining.value = focusDuration
+                _isRunning.value = false
+            }
+            "SKIP" -> when (_stateName.value) {
+                "FOCUS" -> setStandalonePhase("SHORT_BREAK", shortBreakDuration, false)
+                "SHORT_BREAK" -> setStandalonePhase("LONG_BREAK", longBreakDuration, false)
+                else -> setStandalonePhase("FOCUS", focusDuration, false)
+            }
+            "START_FOCUS" -> setStandalonePhase("FOCUS", focusDuration, true)
+            "START_SHORT_BREAK" -> setStandalonePhase("SHORT_BREAK", shortBreakDuration, true)
+            "START_LONG_BREAK" -> setStandalonePhase("LONG_BREAK", longBreakDuration, true)
+        }
+        if (previousState != _stateName.value) timerSessionId = UUID.randomUUID().toString()
+        hasWearAuthority = true
+        timerUpdatedAtEpochMs = System.currentTimeMillis()
+        wearLeaseExpiresAtEpochMs = timerUpdatedAtEpochMs + WEAR_AUTHORITY_LEASE_MS
+        timerRevision = maxOf(timerRevision + 1, timerUpdatedAtEpochMs)
+        saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
+    }
+
+    private fun setStandalonePhase(state: String, seconds: Int, running: Boolean) {
+        _stateName.value = state
+        _secondsRemaining.value = seconds
+        _isRunning.value = running
+    }
+
+    private fun publishWearSnapshot() {
+        val sourceNode = runCatching { Tasks.await(nodeClient.localNode).id }.getOrDefault("wear")
+        val request = PutDataMapRequest.create("/pomodoro/state").apply {
+            dataMap.putString("state", _stateName.value)
+            dataMap.putString("current_phase", _stateName.value)
+            dataMap.putInt("seconds_remaining", _secondsRemaining.value)
+            dataMap.putBoolean("is_running", _isRunning.value)
+            dataMap.putBoolean("is_panic_active", _stateName.value == "PANIC_MODE")
+            dataMap.putLong("timer_revision", timerRevision)
+            dataMap.putString("session_id", timerSessionId)
+            dataMap.putString("source_device", "wear")
+            dataMap.putString("source_node", sourceNode)
+            dataMap.putString("authority", "WEAR")
+            dataMap.putLong("anchor_elapsed_realtime", SystemClock.elapsedRealtime())
+            dataMap.putLong("lease_expires_at", wearLeaseExpiresAtEpochMs)
+            dataMap.putLong("timestamp", timerUpdatedAtEpochMs)
+        }.asPutDataRequest().setUrgent()
+        runCatching { Tasks.await(dataClient.putDataItem(request)) }
+            .onSuccess { lastStandalonePublishAtEpochMs = System.currentTimeMillis() }
+            .onFailure { Log.e(TAG, "Failed to publish standalone timer snapshot", it) }
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -437,6 +540,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val item = event.dataItem
                 if (item.uri.path == "/pomodoro/state") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    if (dataMap.getString("source_device") == "wear") continue
+                    val incomingRevision = dataMap.getLong("timer_revision", -1L)
+                    if (incomingRevision < timerRevision && hasWearAuthority) continue
                     val newStateRaw = dataMap.getString("state") ?: dataMap.getString("current_phase") ?: "FOCUS"
                     val isPanic = dataMap.getBoolean("is_panic_active", false)
 
@@ -453,9 +559,20 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     if (newState == "FOCUS" && _secondsRemaining.value > 300 && newSeconds <= 300) {
                         triggerDoubleTapHaptic()
                     }
-                    _secondsRemaining.value = newSeconds
+                    val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
+                    val reconciledSeconds = if (dataMap.getBoolean("is_running")) {
+                        (newSeconds - ((System.currentTimeMillis() - updatedAt).coerceAtLeast(0L) / 1_000L).toInt()).coerceAtLeast(0)
+                    } else newSeconds
+                    _secondsRemaining.value = reconciledSeconds
                     _isRunning.value = dataMap.getBoolean("is_running")
-                    timerRevision = dataMap.getLong("timer_revision", timerRevision)
+                    timerRevision = incomingRevision
+                    timerSessionId = dataMap.getString("session_id") ?: timerSessionId
+                    timerUpdatedAtEpochMs = System.currentTimeMillis()
+                    wearLeaseExpiresAtEpochMs = 0L
+                    hasWearAuthority = false
+                    focusDuration = dataMap.getInt("focus_duration", focusDuration)
+                    shortBreakDuration = dataMap.getInt("short_break_duration", shortBreakDuration)
+                    longBreakDuration = dataMap.getInt("long_break_duration", longBreakDuration)
                     activityScope.launch(Dispatchers.IO) { commandOutbox.flush() }
 
                     saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
@@ -471,6 +588,14 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             .putString("state", state)
             .putInt("seconds_remaining", secondsRemaining)
             .putBoolean("is_running", isRunning)
+            .putLong("timer_revision", timerRevision)
+            .putString("session_id", timerSessionId)
+            .putLong("timer_updated_at", timerUpdatedAtEpochMs)
+            .putLong("wear_lease_expires_at", wearLeaseExpiresAtEpochMs)
+            .putBoolean("wear_authority", hasWearAuthority)
+            .putInt("focus_duration", focusDuration)
+            .putInt("short_break_duration", shortBreakDuration)
+            .putInt("long_break_duration", longBreakDuration)
             .apply()
 
         val requester = androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester.create(
@@ -484,6 +609,28 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             android.content.ComponentName(this, CustomTextComplicationService::class.java)
         )
         customRequester.requestUpdateAll()
+    }
+
+    private fun restoreTimerState() {
+        val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
+        _stateName.value = prefs.getString("state", "FOCUS") ?: "FOCUS"
+        _secondsRemaining.value = prefs.getInt("seconds_remaining", 1500)
+        _isRunning.value = prefs.getBoolean("is_running", false)
+        timerRevision = prefs.getLong("timer_revision", -1L)
+        timerSessionId = prefs.getString("session_id", timerSessionId) ?: timerSessionId
+        timerUpdatedAtEpochMs = prefs.getLong("timer_updated_at", System.currentTimeMillis())
+        wearLeaseExpiresAtEpochMs = prefs.getLong("wear_lease_expires_at", 0L)
+        hasWearAuthority = prefs.getBoolean("wear_authority", false) &&
+            System.currentTimeMillis() <= wearLeaseExpiresAtEpochMs
+        focusDuration = prefs.getInt("focus_duration", 1500)
+        shortBreakDuration = prefs.getInt("short_break_duration", 300)
+        longBreakDuration = prefs.getInt("long_break_duration", 900)
+        if (_isRunning.value && hasWearAuthority) {
+            val elapsedSeconds = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1_000L).toInt()
+            _secondsRemaining.value = (_secondsRemaining.value - elapsedSeconds).coerceAtLeast(0)
+            if (_secondsRemaining.value == 0) _isRunning.value = false
+            timerUpdatedAtEpochMs = System.currentTimeMillis()
+        }
     }
 
     private fun hasHeartRatePermission(): Boolean {
@@ -615,6 +762,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         private const val TAG = "WearMainActivity"
         private const val ROTARY_PAGE_THRESHOLD_PX = 28f
         private const val ROTARY_SETTLE_MS = 140L
+        private const val WEAR_AUTHORITY_LEASE_MS = 2 * 60 * 60 * 1_000L
+        private const val STANDALONE_PUBLISH_INTERVAL_MS = 15_000L
     }
 }
 

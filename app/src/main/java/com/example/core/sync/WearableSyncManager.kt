@@ -40,6 +40,7 @@ class WearableSyncManager(
     private val engine: PomodoroEngine
 ) : DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener {
     private val watchFaceConfigStore = WatchFaceConfigStore(context)
+    private val timerSnapshotStore = TimerSnapshotStore(context)
     val watchFaceConfig = watchFaceConfigStore.config
     val watchFacePresets = watchFaceConfigStore.presets
     val watchFaceRecentColors = watchFaceConfigStore.recentColors
@@ -62,16 +63,24 @@ class WearableSyncManager(
 
     @Volatile
     private var pendingWatchFaceRevision: String? = null
-    private val timerRevision = AtomicLong(System.currentTimeMillis())
-    private var timerSessionId = UUID.randomUUID().toString()
+    private val restoredTimerSnapshot = timerSnapshotStore.load()
+    private val timerRevision = AtomicLong(restoredTimerSnapshot?.revision ?: System.currentTimeMillis())
+    private var timerSessionId = restoredTimerSnapshot?.sessionId ?: UUID.randomUUID().toString()
+    @Volatile
+    private var localNodeId = SOURCE_PHONE
     private var lastPublishedState = engine.currentState.value
-    private var currentSnapshot = createTimerSnapshot(timerRevision.get())
+    private var currentSnapshot = restoredTimerSnapshot ?: createTimerSnapshot(timerRevision.get())
     private val handledCommandIds = LinkedHashSet<String>()
+    @Volatile
+    private var hasPublishedInProcess = false
 
     init {
         // Register listeners to handle incoming sync updates bidirectionally
         dataClient.addListener(this)
         messageClient.addListener(this)
+        scope.launch(Dispatchers.IO) {
+            localNodeId = runCatching { nodeClient.localNode.await().id }.getOrDefault(SOURCE_PHONE)
+        }
         scope.launch(Dispatchers.IO) { syncOutbox.flush() }
         scope.launch(Dispatchers.IO) { replayStoredWatchFaceConfig() }
         scope.launch(Dispatchers.IO) {
@@ -87,38 +96,53 @@ class WearableSyncManager(
      * Publishes current state to the Wearable Data Layer.
      * Standard path used for sync: /pomodoro/state
      */
+    @Synchronized
     fun pushStateToWearable() {
+        val now = System.currentTimeMillis()
+        val expectedSeconds = TimerSnapshotResolver.remainingAt(currentSnapshot, now)
+        val hasMeaningfulChange = currentSnapshot.authority != TimerAuthority.PHONE ||
+            currentSnapshot.state != engine.currentState.value ||
+            currentSnapshot.isRunning != engine.isRunning.value ||
+            kotlin.math.abs(expectedSeconds - engine.secondsRemaining.value) > 1
+        if (hasPublishedInProcess && !hasMeaningfulChange) return
+        if (lastPublishedState != engine.currentState.value) {
+            timerSessionId = UUID.randomUUID().toString()
+            lastPublishedState = engine.currentState.value
+        }
+        val snapshot = createTimerSnapshot(timerRevision.incrementAndGet())
+        currentSnapshot = snapshot
+        timerSnapshotStore.save(snapshot)
+        val isPanic = snapshot.state == PomodoroState.PANIC_MODE
         scope.launch(Dispatchers.IO) {
             try {
-                if (lastPublishedState != engine.currentState.value) {
-                    timerSessionId = UUID.randomUUID().toString()
-                    lastPublishedState = engine.currentState.value
-                }
-                currentSnapshot = createTimerSnapshot(timerRevision.incrementAndGet())
-                val isPanic = engine.currentState.value == PomodoroState.PANIC_MODE
                 val goalPrefs = context.getSharedPreferences("focus_goal_prefs", Context.MODE_PRIVATE)
                 val request = PutDataMapRequest.create(PATH_POMODORO_STATE).apply {
-                    dataMap.putString(KEY_STATE, engine.currentState.value.name)
-                    dataMap.putString(KEY_CURRENT_PHASE, engine.currentState.value.name)
-                    dataMap.putInt(KEY_SECONDS_REMAINING, engine.secondsRemaining.value)
-                    dataMap.putBoolean(KEY_IS_RUNNING, engine.isRunning.value)
+                    dataMap.putString(KEY_STATE, snapshot.state.name)
+                    dataMap.putString(KEY_CURRENT_PHASE, snapshot.state.name)
+                    dataMap.putInt(KEY_SECONDS_REMAINING, snapshot.secondsRemaining)
+                    dataMap.putBoolean(KEY_IS_RUNNING, snapshot.isRunning)
                     dataMap.putBoolean(KEY_IS_PANIC_ACTIVE, isPanic)
-                    dataMap.putLong(KEY_TIMER_REVISION, currentSnapshot.revision)
-                    dataMap.putString(KEY_SESSION_ID, currentSnapshot.sessionId)
-                    dataMap.putString(KEY_SOURCE_DEVICE, currentSnapshot.sourceDevice)
-                    dataMap.putString(KEY_AUTHORITY, currentSnapshot.authority.name)
-                    dataMap.putLong(KEY_ANCHOR_ELAPSED_REALTIME, currentSnapshot.anchorElapsedRealtimeMs)
-                    dataMap.putLong(KEY_LEASE_EXPIRES_AT, currentSnapshot.leaseExpiresAtEpochMs)
+                    dataMap.putLong(KEY_TIMER_REVISION, snapshot.revision)
+                    dataMap.putString(KEY_SESSION_ID, snapshot.sessionId)
+                    dataMap.putString(KEY_SOURCE_DEVICE, SOURCE_PHONE)
+                    dataMap.putString(KEY_SOURCE_NODE, snapshot.sourceDevice)
+                    dataMap.putString(KEY_AUTHORITY, snapshot.authority.name)
+                    dataMap.putLong(KEY_ANCHOR_ELAPSED_REALTIME, snapshot.anchorElapsedRealtimeMs)
+                    dataMap.putLong(KEY_LEASE_EXPIRES_AT, snapshot.leaseExpiresAtEpochMs)
+                    dataMap.putInt(KEY_FOCUS_DURATION, engine.focusDuration)
+                    dataMap.putInt(KEY_SHORT_BREAK_DURATION, engine.shortBreakDuration)
+                    dataMap.putInt(KEY_LONG_BREAK_DURATION, engine.longBreakDuration)
                     dataMap.putInt("daily_focus_minutes", goalPrefs.getInt("daily_focus_minutes", 0))
                     dataMap.putInt("daily_target_minutes", goalPrefs.getInt("daily_target_minutes", 120))
                     // Ensure the update is always detected even if primitive values are same
-                    dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
+                    dataMap.putLong(KEY_TIMESTAMP, snapshot.updatedAtEpochMs)
                 }.asPutDataRequest()
 
                 request.setUrgent()
                 dataClient.putDataItem(request).await()
+                hasPublishedInProcess = true
                 syncOutbox.flush()
-                Log.d(TAG, "Successfully pushed Pomodoro state to Wearable Data Layer (state=${engine.currentState.value.name}, remaining=${engine.secondsRemaining.value}, panic=$isPanic).")
+                Log.d(TAG, "Successfully pushed Pomodoro snapshot revision=${snapshot.revision} state=${snapshot.state} remaining=${snapshot.secondsRemaining}.")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to push state to Wearable Data Layer", e)
             }
@@ -311,7 +335,9 @@ class WearableSyncManager(
                         val incoming = TimerSnapshot(
                             revision = dataMap.getLong(KEY_TIMER_REVISION, -1L),
                             sessionId = dataMap.getString(KEY_SESSION_ID) ?: "legacy",
-                            sourceDevice = dataMap.getString(KEY_SOURCE_DEVICE) ?: SOURCE_WEAR,
+                            sourceDevice = dataMap.getString(KEY_SOURCE_NODE)
+                                ?: dataMap.getString(KEY_SOURCE_DEVICE)
+                                ?: SOURCE_WEAR,
                             authority = runCatching {
                                 TimerAuthority.valueOf(dataMap.getString(KEY_AUTHORITY) ?: TimerAuthority.WEAR.name)
                             }.getOrDefault(TimerAuthority.WEAR),
@@ -330,6 +356,7 @@ class WearableSyncManager(
                         )
                         if (resolution is SnapshotResolution.Accept) {
                             currentSnapshot = resolution.snapshot
+                            timerSnapshotStore.save(resolution.snapshot)
                             timerRevision.set(maxOf(timerRevision.get(), incoming.revision))
                             scope.launch(Dispatchers.Main) {
                                 val reconciledSeconds = TimerSnapshotResolver.remainingAt(
@@ -487,7 +514,7 @@ class WearableSyncManager(
     private fun createTimerSnapshot(revision: Long) = TimerSnapshot(
         revision = revision,
         sessionId = timerSessionId,
-        sourceDevice = SOURCE_PHONE,
+        sourceDevice = localNodeId,
         authority = TimerAuthority.PHONE,
         state = engine.currentState.value,
         secondsRemaining = engine.secondsRemaining.value,
@@ -543,6 +570,7 @@ class WearableSyncManager(
         const val KEY_SCHEMA_VERSION = "schema_version"
         const val KEY_REVISION = "revision"
         const val KEY_SOURCE_DEVICE = "source_device"
+        const val KEY_SOURCE_NODE = "source_node"
         const val KEY_SUCCESS = "success"
         const val KEY_STATUS_MESSAGE = "status_message"
         const val KEY_APPLIED_AT = "applied_at"
@@ -553,6 +581,9 @@ class WearableSyncManager(
         const val KEY_AUTHORITY = "authority"
         const val KEY_ANCHOR_ELAPSED_REALTIME = "anchor_elapsed_realtime"
         const val KEY_LEASE_EXPIRES_AT = "lease_expires_at"
+        const val KEY_FOCUS_DURATION = "focus_duration"
+        const val KEY_SHORT_BREAK_DURATION = "short_break_duration"
+        const val KEY_LONG_BREAK_DURATION = "long_break_duration"
         const val SOURCE_PHONE = "phone"
         const val SOURCE_WEAR = "wear"
         private const val MAX_HANDLED_COMMANDS = 256

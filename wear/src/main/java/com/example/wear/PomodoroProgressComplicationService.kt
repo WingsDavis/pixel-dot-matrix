@@ -25,13 +25,18 @@ class PomodoroProgressComplicationService : SuspendingComplicationDataSourceServ
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
         val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
         val state = prefs.getString("state", "FOCUS") ?: "FOCUS"
-        val secondsRemaining = prefs.getInt("seconds_remaining", 1500)
+        val storedSeconds = prefs.getInt("seconds_remaining", 1500)
         val isRunning = prefs.getBoolean("is_running", false)
+        val secondsRemaining = if (isRunning) {
+            val elapsed = ((System.currentTimeMillis() - prefs.getLong("timer_updated_at", System.currentTimeMillis()))
+                .coerceAtLeast(0L) / 1_000L).toInt()
+            (storedSeconds - elapsed).coerceAtLeast(0)
+        } else storedSeconds
 
         val maxSeconds = when (state) {
-            "FOCUS" -> 25 * 60f
-            "SHORT_BREAK" -> 5 * 60f
-            "LONG_BREAK" -> 15 * 60f
+            "FOCUS" -> prefs.getInt("focus_duration", 25 * 60).toFloat()
+            "SHORT_BREAK" -> prefs.getInt("short_break_duration", 5 * 60).toFloat()
+            "LONG_BREAK" -> prefs.getInt("long_break_duration", 15 * 60).toFloat()
             "PANIC_MODE" -> 60f
             else -> 25 * 60f
         }

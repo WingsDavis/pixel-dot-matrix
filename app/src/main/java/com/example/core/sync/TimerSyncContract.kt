@@ -68,23 +68,23 @@ object TimerSnapshotResolver {
         if (incoming.revision <= local.revision) {
             return SnapshotResolution.Reject("stale_revision")
         }
-        val wearHasLease = incoming.authority == TimerAuthority.WEAR && nowEpochMs <= wearLeaseExpiresAtEpochMs
+        val wearHasLease = incoming.authority == TimerAuthority.WEAR &&
+            incoming.leaseExpiresAtEpochMs == wearLeaseExpiresAtEpochMs &&
+            nowEpochMs <= wearLeaseExpiresAtEpochMs
         if (local.authority == TimerAuthority.PHONE && !wearHasLease) {
             return SnapshotResolution.Reject("phone_authoritative")
         }
         return SnapshotResolution.Accept(incoming)
     }
 
-    fun remainingAt(snapshot: TimerSnapshot, nowEpochMs: Long, maxClockDriftMs: Long = 2_000L): Int {
+    fun remainingAt(snapshot: TimerSnapshot, nowEpochMs: Long, maxFutureClockSkewMs: Long = 2_000L): Int {
         if (!snapshot.isRunning) return snapshot.secondsRemaining.coerceAtLeast(0)
-        val elapsedMs = (nowEpochMs - snapshot.updatedAtEpochMs).coerceAtLeast(0L)
-        val boundedDriftMs = elapsedMs.coerceAtMost(maxClockDriftMs)
-        return (snapshot.secondsRemaining - (boundedDriftMs / 1_000L).toInt()).coerceAtLeast(0)
+        val elapsedMs = nowEpochMs - snapshot.updatedAtEpochMs
+        if (elapsedMs < -maxFutureClockSkewMs) return snapshot.secondsRemaining.coerceAtLeast(0)
+        return (snapshot.secondsRemaining - (elapsedMs.coerceAtLeast(0L) / 1_000L).toInt()).coerceAtLeast(0)
     }
 
     fun commandIsAcceptable(command: TimerCommand, currentRevision: Long): Boolean {
-        return command.baseRevision < 0L || command.baseRevision >= currentRevision - COMMAND_REVISION_TOLERANCE
+        return command.baseRevision < 0L || command.baseRevision == currentRevision
     }
-
-    private const val COMMAND_REVISION_TOLERANCE = 5L
 }

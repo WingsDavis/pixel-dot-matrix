@@ -36,6 +36,8 @@ class WearSyncService : WearableListenerService() {
                     val secondsRemaining = dataMap.getInt("seconds_remaining")
                     val isRunning = dataMap.getBoolean("is_running")
                     val timerRevision = dataMap.getLong("timer_revision", -1L)
+                    val sourceDevice = dataMap.getString("source_device") ?: "phone"
+                    val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
                     val dailyFocusMinutes = dataMap.getInt("daily_focus_minutes", 0)
                     val dailyTargetMinutes = dataMap.getInt("daily_target_minutes", 120)
 
@@ -45,6 +47,13 @@ class WearSyncService : WearableListenerService() {
                         .putInt("seconds_remaining", secondsRemaining)
                         .putBoolean("is_running", isRunning)
                         .putLong("timer_revision", timerRevision)
+                        .putString("session_id", dataMap.getString("session_id"))
+                        .putLong("timer_updated_at", updatedAt)
+                        .putLong("wear_lease_expires_at", dataMap.getLong("lease_expires_at", 0L))
+                        .putBoolean("wear_authority", sourceDevice == "wear" && dataMap.getString("authority") == "WEAR")
+                        .putInt("focus_duration", dataMap.getInt("focus_duration", prefs.getInt("focus_duration", 1500)))
+                        .putInt("short_break_duration", dataMap.getInt("short_break_duration", prefs.getInt("short_break_duration", 300)))
+                        .putInt("long_break_duration", dataMap.getInt("long_break_duration", prefs.getInt("long_break_duration", 900)))
                         .putInt("daily_focus_minutes", dailyFocusMinutes)
                         .putInt("daily_target_minutes", dailyTargetMinutes)
                         .apply()

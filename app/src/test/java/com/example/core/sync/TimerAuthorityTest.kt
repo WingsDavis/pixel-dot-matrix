@@ -8,7 +8,7 @@ import org.junit.Test
 
 class TimerAuthorityTest {
     @Test
-    fun runningSnapshotReconcilesNetworkDelayButClampsClockDrift() {
+    fun runningSnapshotReconcilesElapsedOfflineTime() {
         val snapshot = TimerSnapshot(
             revision = 7,
             sessionId = "session",
@@ -22,7 +22,7 @@ class TimerAuthorityTest {
         )
 
         assertEquals(99, TimerSnapshotResolver.remainingAt(snapshot, 2_200))
-        assertEquals(98, TimerSnapshotResolver.remainingAt(snapshot, 9_000))
+        assertEquals(92, TimerSnapshotResolver.remainingAt(snapshot, 9_000))
     }
 
     @Test
@@ -32,9 +32,16 @@ class TimerAuthorityTest {
     }
 
     @Test
-    fun commandFreshnessAllowsSmallReconnectionGapAndRejectsOldCommand() {
-        assertTrue(TimerSnapshotResolver.commandIsAcceptable(TimerCommand(action = "PAUSE", baseRevision = 98), 100))
+    fun commandFreshnessRequiresCurrentRevisionAndAllowsLegacyCommands() {
+        assertTrue(TimerSnapshotResolver.commandIsAcceptable(TimerCommand(action = "PAUSE", baseRevision = 100), 100))
+        assertFalse(TimerSnapshotResolver.commandIsAcceptable(TimerCommand(action = "PAUSE", baseRevision = 98), 100))
         assertFalse(TimerSnapshotResolver.commandIsAcceptable(TimerCommand(action = "PAUSE", baseRevision = 90), 100))
         assertTrue(TimerSnapshotResolver.commandIsAcceptable(TimerCommand(action = "RESET", baseRevision = -1), 100))
+    }
+
+    @Test
+    fun futureClockSkewNeverAddsTime() {
+        val snapshot = TimerSnapshot(7, "session", "watch", TimerAuthority.WEAR, PomodoroState.FOCUS, 100, true, 10_000, 50)
+        assertEquals(100, TimerSnapshotResolver.remainingAt(snapshot, 1_000))
     }
 }

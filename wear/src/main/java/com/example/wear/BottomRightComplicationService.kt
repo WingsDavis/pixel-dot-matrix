@@ -29,8 +29,13 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
         val configPrefs = getSharedPreferences("watchface_config_prefs", Context.MODE_PRIVATE)
         val mode = configPrefs.getString("bottom_right_slot_mode", "date") ?: "date"
         val state = syncPrefs.getString("state", "FOCUS") ?: "FOCUS"
-        val secondsRemaining = syncPrefs.getInt("seconds_remaining", 1500)
+        val storedSeconds = syncPrefs.getInt("seconds_remaining", 1500)
         val isRunning = syncPrefs.getBoolean("is_running", false)
+        val secondsRemaining = if (isRunning) {
+            val elapsed = ((System.currentTimeMillis() - syncPrefs.getLong("timer_updated_at", System.currentTimeMillis()))
+                .coerceAtLeast(0L) / 1_000L).toInt()
+            (storedSeconds - elapsed).coerceAtLeast(0)
+        } else storedSeconds
 
         val value = when (mode) {
             "hidden" -> null

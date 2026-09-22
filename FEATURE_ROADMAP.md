@@ -20,19 +20,19 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
-| 1. State and reliability | 1-5 | 1 | 3 | 0 | 1 |
+| 1. State and reliability | 1-5 | 2 | 2 | 0 | 1 |
 | 2. Phone productivity | 6-10 | 0 | 1 | 0 | 4 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **1** | **13** | **0** | **6** |
+| **Total** | **20** | **2** | **12** | **0** | **6** |
 
 ## Master Tracker
 
 | ID | Feature | Priority | Status | Depends on |
 |---:|---|---|---|---|
 | 1 | Persist timer settings | P0 | `[x]` | None |
-| 2 | Shared timer authority | P0 | `[~]` | 1 |
+| 2 | Shared timer authority | P0 | `[x]` | 1 |
 | 3 | Reliable offline synchronization | P0 | `[~]` | 2 |
 | 4 | Watch-face configuration persistence | P0 | `[~]` | 1, 3 |
 | 5 | Session automation | P1 | `[ ]` | 1, 2 |
@@ -69,7 +69,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - [x] Unit tests cover defaults, writes, reads, and migration.
 - [x] Settings UI reflects persisted values on first composition.
 
-### 2. Shared Timer Authority `[~]`
+### 2. Shared Timer Authority `[x]`
 
 **Existing foundation**
 - Phone and Wear already exchange timer state and control messages.
@@ -84,11 +84,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Calculate elapsed time from anchors instead of relying on message frequency.
 
 **Acceptance criteria**
-- [ ] Phone and watch differ by no more than one second after reconciliation.
-- [ ] Stale revisions cannot overwrite newer state.
-- [ ] Start, pause, skip, reset, and phase selection work from either device.
-- [ ] Reconnecting after standalone use produces one deterministic state.
-- [ ] Tests cover conflict, stale message, reconnect, and clock drift cases.
+- [x] Phone and watch differ by no more than one second after reconciliation.
+- [x] Stale revisions cannot overwrite newer state.
+- [x] Start, pause, skip, reset, and phase selection work from either device.
+- [x] Reconnecting after standalone use produces one deterministic state.
+- [x] Tests cover conflict, stale message, reconnect, and clock drift cases.
 
 ### 3. Reliable Offline Synchronization `[~]`
 
