@@ -43,6 +43,10 @@ fun DefenseScreen(viewModel: PomodoroViewModel) {
     val domainStore = remember { DomainProfileStore(context) }
     var domains by remember { mutableStateOf(domainStore.activeDomains().sorted()) }
     var newDomain by remember { mutableStateOf("") }
+    var profiles by remember { mutableStateOf(domainStore.profiles()) }
+    var activeProfileId by remember { mutableStateOf(domainStore.activeProfileId()) }
+    var profileName by remember { mutableStateOf("") }
+    var autoFocus by remember { mutableStateOf(domainStore.autoActivateDuringFocus()) }
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -113,6 +117,50 @@ fun DefenseScreen(viewModel: PomodoroViewModel) {
         item {
             BentoCard(modifier = Modifier.fillMaxWidth(), color = CardWhite, shape = RoundedCornerShape(8.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Protection profiles", fontWeight = FontWeight.Bold, color = CardBlack)
+                    profiles.forEach { profile ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(profile.name, color = CardBlack, fontSize = 12.sp, fontWeight = if (profile.id == activeProfileId) FontWeight.Bold else FontWeight.Normal)
+                            Row {
+                                TextButton(onClick = {
+                                    domainStore.selectProfile(profile.id)
+                                    activeProfileId = profile.id
+                                    domains = domainStore.activeDomains().sorted()
+                                }) { Text(if (profile.id == activeProfileId) "Active" else "Use") }
+                                if (profile.id != DomainProfileStore.DEFAULT_PROFILE_ID) {
+                                    TextButton(onClick = {
+                                        domainStore.deleteProfile(profile.id)
+                                        profiles = domainStore.profiles()
+                                        activeProfileId = domainStore.activeProfileId()
+                                        domains = domainStore.activeDomains().sorted()
+                                    }) { Text("Delete") }
+                                }
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = profileName,
+                        onValueChange = { profileName = it },
+                        label = { Text("New profile name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedButton(onClick = {
+                        if (profileName.isNotBlank()) {
+                            val profile = domainStore.saveProfile(profileName, domains)
+                            domainStore.selectProfile(profile.id)
+                            profiles = domainStore.profiles()
+                            activeProfileId = profile.id
+                            profileName = ""
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Save current domains as profile") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Enable during Focus", color = CardBlack, fontSize = 12.sp)
+                        Switch(checked = autoFocus, onCheckedChange = {
+                            autoFocus = it
+                            domainStore.setAutoActivateDuringFocus(it)
+                        })
+                    }
                     Text("Blocked domains", fontWeight = FontWeight.Bold, color = CardBlack)
                     OutlinedTextField(
                         value = newDomain,

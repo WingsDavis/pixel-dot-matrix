@@ -21,6 +21,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
+import android.net.VpnService
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,11 +34,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
+import com.example.core.protection.DomainProfileStore
 
 class PomodoroViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
 
     private val database = AppDatabase.getDatabase(application)
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
+    private val domainProfiles = DomainProfileStore(application)
 
     val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -139,6 +142,12 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
             currentState.collect { state ->
                 val now = System.currentTimeMillis()
+                if (domainProfiles.autoActivateDuringFocus()) {
+                    val shouldEnable = state == PomodoroState.FOCUS
+                    if (shouldEnable != _isDnsSinkholeActive.value && (!shouldEnable || VpnService.prepare(application) == null)) {
+                        setDnsSinkholeEnabled(application, shouldEnable)
+                    }
+                }
                 if (lastState == PomodoroState.FOCUS && state != PomodoroState.FOCUS) {
                     // Log the focus session
                     val duration = engine.focusDuration - secondsRemaining.value
@@ -282,7 +291,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             action = if (enabled) com.example.service.LocalDnsSinkholeVpnService.ACTION_START else com.example.service.LocalDnsSinkholeVpnService.ACTION_STOP
         }
         try {
-            if (enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (!enabled) {
+                context.stopService(intent)
+            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
