@@ -16,6 +16,9 @@ interface PanicDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPanicLog(panicLog: PanicLogEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIncidentIfAbsent(panicLog: PanicLogEntity): Long
+
     @Update
     suspend fun updatePanicLog(panicLog: PanicLogEntity)
 

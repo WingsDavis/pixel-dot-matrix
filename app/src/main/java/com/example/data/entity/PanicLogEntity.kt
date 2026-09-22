@@ -2,8 +2,9 @@ package com.example.data.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
-@Entity(tableName = "panic_logs")
+@Entity(tableName = "panic_logs", indices = [Index(value = ["incidentId"], unique = true)])
 data class PanicLogEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
@@ -20,3 +21,16 @@ data class PanicLogEntity(
     val sourceDevice: String = "PHONE",
     val incidentStatus: String = "OPEN"
 )
+
+object IncidentStatus {
+    const val OPEN = "OPEN"
+    const val PENDING_DETAIL = "PENDING_DETAIL"
+    const val CLOSED = "CLOSED"
+    const val DISMISSED = "DISMISSED"
+
+    fun canTransition(from: String, to: String): Boolean = when (from) {
+        OPEN -> to == PENDING_DETAIL || to == CLOSED || to == DISMISSED
+        PENDING_DETAIL -> to == CLOSED || to == DISMISSED
+        else -> false
+    }
+}

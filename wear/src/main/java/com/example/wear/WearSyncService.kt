@@ -85,6 +85,11 @@ class WearSyncService : WearableListenerService() {
         envelope?.let(::acknowledge)
 
         when (messageEvent.path) {
+            "/incident/status" -> {
+                val incidentId = String(payload).substringBefore('|')
+                WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this))
+                    .acknowledge(incidentId)
+            }
             "/pomodoro/custom_text" -> {
                 val customText = String(payload)
                 Log.d(TAG, "Received custom text via message: $customText")

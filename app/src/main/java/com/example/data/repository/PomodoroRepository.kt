@@ -29,6 +29,8 @@ class PomodoroRepository(
         return panicDao.insertPanicLog(panicLog)
     }
 
+    suspend fun insertIncidentIfAbsent(incident: PanicLogEntity): Long = panicDao.insertIncidentIfAbsent(incident)
+
     suspend fun updatePanicLog(panicLog: PanicLogEntity) {
         panicDao.updatePanicLog(panicLog)
     }

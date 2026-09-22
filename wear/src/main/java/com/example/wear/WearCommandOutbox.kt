@@ -41,6 +41,13 @@ class WearCommandOutbox(
         prefs.edit().putStringSet(KEY_ITEMS, remaining).apply()
     }
 
+    fun acknowledge(id: String) {
+        val remaining = prefs.getStringSet(KEY_ITEMS, emptySet()).orEmpty().filterNot {
+            it.substringAfter('\n').split('|').getOrNull(1) == id
+        }.toSet()
+        prefs.edit().putStringSet(KEY_ITEMS, remaining).apply()
+    }
+
     private fun queue(path: String, encoded: String) {
         val items = prefs.getStringSet(KEY_ITEMS, emptySet()).orEmpty().toMutableSet()
         val id = encoded.split('|').getOrNull(1)

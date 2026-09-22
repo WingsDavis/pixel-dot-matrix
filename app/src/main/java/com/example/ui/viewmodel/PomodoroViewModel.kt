@@ -12,6 +12,7 @@ import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
 import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
+import com.example.data.entity.IncidentStatus
 import com.example.data.entity.SessionLogEntity
 import com.example.data.repository.PomodoroRepository
 import com.example.core.sync.WearableSyncManager
@@ -247,9 +248,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     targetApp = targetApp,
                     triggerReason = triggerReason,
                     forensicNotes = notes,
-                    incidentStatus = "CLOSED"
+                    incidentStatus = IncidentStatus.CLOSED
                 )
             )
+            wearableSyncManager.sendIncidentStatus(auditLog.incidentId, IncidentStatus.CLOSED)
             _activeIncidentAudit.value = null
         }
     }
@@ -261,12 +263,14 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                 incidentId = incidentId,
                 incidentType = "DISTRACTION",
                 sourceDevice = "WEAR",
-                incidentStatus = "PENDING_DETAIL",
+                incidentStatus = IncidentStatus.PENDING_DETAIL,
                 resolvedAt = System.currentTimeMillis(),
                 taskName = _currentTaskName.value.ifBlank { null }
             )
-            repository.insertPanicLog(incident)
-            _activeIncidentAudit.value = incident
+            if (repository.insertIncidentIfAbsent(incident) != -1L) {
+                _activeIncidentAudit.value = incident
+            }
+            wearableSyncManager.sendIncidentStatus(incidentId, IncidentStatus.PENDING_DETAIL)
         }
     }
 
@@ -274,7 +278,14 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
      * Dismisses the active distraction audit questionnaire.
      */
     fun dismissIncidentAudit() {
-        _activeIncidentAudit.value = null
+        val incident = _activeIncidentAudit.value ?: return
+        viewModelScope.launch {
+            if (IncidentStatus.canTransition(incident.incidentStatus, IncidentStatus.DISMISSED)) {
+                repository.updatePanicLog(incident.copy(incidentStatus = IncidentStatus.DISMISSED))
+                wearableSyncManager.sendIncidentStatus(incident.incidentId, IncidentStatus.DISMISSED)
+            }
+            _activeIncidentAudit.value = null
+        }
     }
 
     /**

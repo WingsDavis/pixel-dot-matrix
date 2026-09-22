@@ -11,7 +11,7 @@ import com.example.data.entity.SyncOutboxEntity
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class], version = 5, exportSchema = false)
+@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class], version = 6, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun panicDao(): PanicDao
@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "panic_pomodoro_db"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
@@ -71,6 +71,14 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE panic_logs ADD COLUMN incidentStatus TEXT NOT NULL DEFAULT 'OPEN'")
                 database.execSQL("UPDATE panic_logs SET incidentId = 'legacy-' || id")
                 database.execSQL("UPDATE panic_logs SET incidentStatus = CASE WHEN resolvedAt IS NULL THEN 'OPEN' ELSE 'PENDING_DETAIL' END")
+            }
+        }
+
+        const val CREATE_INCIDENT_ID_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS index_panic_logs_incidentId ON panic_logs(incidentId)"
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(CREATE_INCIDENT_ID_INDEX)
             }
         }
     }

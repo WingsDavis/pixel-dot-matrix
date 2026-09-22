@@ -157,6 +157,16 @@ class WearableSyncManager(
         }
     }
 
+    fun sendIncidentStatus(incidentId: String, status: String) {
+        scope.launch(Dispatchers.IO) {
+            syncOutbox.enqueue(
+                PATH_INCIDENT_STATUS,
+                "$incidentId|$status".toByteArray(StandardCharsets.UTF_8),
+                coalesceKey = "incident-status-$incidentId"
+            )
+        }
+    }
+
     /**
      * Pushes the selected watch face style preference to the watch.
      */
@@ -507,6 +517,7 @@ class WearableSyncManager(
         const val PATH_WATCHFACE_LOGO_V1 = "/pomodoro/watchface/logo/v1"
         const val PATH_CUSTOM_TEXT = "/pomodoro/custom_text"
         const val PATH_SYNC_ACK = "/pomodoro/sync_ack"
+        const val PATH_INCIDENT_STATUS = "/incident/status"
 
         const val WATCHFACE_CONFIG_SCHEMA_VERSION = 2
 
