@@ -82,6 +82,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private var focusDuration = 1500
     private var shortBreakDuration = 300
     private var longBreakDuration = 900
+    private var longBreakCadence = 4
+    private var completedFocusSessions = 0
+    private var autoStartBreaks = false
+    private var autoStartFocus = false
 
     // Wear Local Biometrics
     private val _heartRate = mutableStateOf(74)
@@ -141,7 +145,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         delay(1_000L)
                         if (_isRunning.value) {
                             _secondsRemaining.value = (_secondsRemaining.value - 1).coerceAtLeast(0)
-                            if (_secondsRemaining.value == 0) _isRunning.value = false
+                            if (_secondsRemaining.value == 0) {
+                                if (hasWearAuthority) completeStandaloneInterval() else _isRunning.value = false
+                            }
                             if (hasWearAuthority) {
                                 timerUpdatedAtEpochMs = System.currentTimeMillis()
                                 timerRevision = maxOf(timerRevision + 1, timerUpdatedAtEpochMs)
@@ -480,7 +486,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             }
             "SKIP" -> when (_stateName.value) {
                 "FOCUS" -> setStandalonePhase("SHORT_BREAK", shortBreakDuration, false)
-                "SHORT_BREAK" -> setStandalonePhase("LONG_BREAK", longBreakDuration, false)
+                "SHORT_BREAK" -> {
+                    completedFocusSessions = 0
+                    setStandalonePhase("LONG_BREAK", longBreakDuration, false)
+                }
                 else -> setStandalonePhase("FOCUS", focusDuration, false)
             }
             "START_FOCUS" -> setStandalonePhase("FOCUS", focusDuration, true)
@@ -517,6 +526,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             dataMap.putLong("anchor_elapsed_realtime", SystemClock.elapsedRealtime())
             dataMap.putLong("lease_expires_at", wearLeaseExpiresAtEpochMs)
             dataMap.putLong("timestamp", timerUpdatedAtEpochMs)
+            dataMap.putInt("completed_focus_sessions", completedFocusSessions)
         }.asPutDataRequest().setUrgent()
         runCatching { Tasks.await(dataClient.putDataItem(request)) }
             .onSuccess { lastStandalonePublishAtEpochMs = System.currentTimeMillis() }
@@ -573,6 +583,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     focusDuration = dataMap.getInt("focus_duration", focusDuration)
                     shortBreakDuration = dataMap.getInt("short_break_duration", shortBreakDuration)
                     longBreakDuration = dataMap.getInt("long_break_duration", longBreakDuration)
+                    longBreakCadence = dataMap.getInt("long_break_cadence", longBreakCadence).coerceIn(2, 8)
+                    completedFocusSessions = dataMap.getInt("completed_focus_sessions", completedFocusSessions)
+                        .coerceIn(0, longBreakCadence - 1)
+                    autoStartBreaks = dataMap.getBoolean("auto_start_breaks", autoStartBreaks)
+                    autoStartFocus = dataMap.getBoolean("auto_start_focus", autoStartFocus)
                     activityScope.launch(Dispatchers.IO) { commandOutbox.flush() }
 
                     saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
@@ -596,6 +611,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             .putInt("focus_duration", focusDuration)
             .putInt("short_break_duration", shortBreakDuration)
             .putInt("long_break_duration", longBreakDuration)
+            .putInt("long_break_cadence", longBreakCadence)
+            .putInt("completed_focus_sessions", completedFocusSessions)
+            .putBoolean("auto_start_breaks", autoStartBreaks)
+            .putBoolean("auto_start_focus", autoStartFocus)
             .apply()
 
         val requester = androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester.create(
@@ -625,12 +644,39 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         focusDuration = prefs.getInt("focus_duration", 1500)
         shortBreakDuration = prefs.getInt("short_break_duration", 300)
         longBreakDuration = prefs.getInt("long_break_duration", 900)
+        longBreakCadence = prefs.getInt("long_break_cadence", 4).coerceIn(2, 8)
+        completedFocusSessions = prefs.getInt("completed_focus_sessions", 0).coerceIn(0, longBreakCadence - 1)
+        autoStartBreaks = prefs.getBoolean("auto_start_breaks", false)
+        autoStartFocus = prefs.getBoolean("auto_start_focus", false)
         if (_isRunning.value && hasWearAuthority) {
-            val elapsedSeconds = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1_000L).toInt()
-            _secondsRemaining.value = (_secondsRemaining.value - elapsedSeconds).coerceAtLeast(0)
-            if (_secondsRemaining.value == 0) _isRunning.value = false
+            var elapsedSeconds = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1_000L).toInt()
+            while (_isRunning.value && elapsedSeconds >= _secondsRemaining.value) {
+                elapsedSeconds = (elapsedSeconds - _secondsRemaining.value).coerceAtLeast(0)
+                completeStandaloneInterval(playHaptic = false)
+            }
+            if (_isRunning.value) {
+                _secondsRemaining.value = (_secondsRemaining.value - elapsedSeconds).coerceAtLeast(0)
+            }
             timerUpdatedAtEpochMs = System.currentTimeMillis()
         }
+    }
+
+    private fun completeStandaloneInterval(playHaptic: Boolean = true) {
+        when (_stateName.value) {
+            "FOCUS" -> {
+                completedFocusSessions++
+                if (completedFocusSessions >= longBreakCadence) {
+                    completedFocusSessions = 0
+                    setStandalonePhase("LONG_BREAK", longBreakDuration, autoStartBreaks)
+                } else {
+                    setStandalonePhase("SHORT_BREAK", shortBreakDuration, autoStartBreaks)
+                }
+            }
+            "SHORT_BREAK", "LONG_BREAK" -> setStandalonePhase("FOCUS", focusDuration, autoStartFocus)
+            else -> _isRunning.value = false
+        }
+        timerSessionId = UUID.randomUUID().toString()
+        if (playHaptic) wearHaptics.play(WearHapticPattern.TRANSITION)
     }
 
     private fun hasHeartRatePermission(): Boolean {

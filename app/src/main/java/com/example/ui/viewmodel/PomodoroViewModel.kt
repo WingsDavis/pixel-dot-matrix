@@ -12,7 +12,9 @@ import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
 import com.example.core.timer.TimerSettings
 import com.example.core.timer.TimerSettingsStore
-import com.example.core.sync.TimerSnapshotResolver
+import com.example.core.timer.SessionTransitionNotifier
+import com.example.core.timer.TimerTransitionCause
+import com.example.core.timer.TimerAutomationReconciler
 import com.example.core.sync.TimerSnapshotStore
 import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
@@ -50,8 +52,26 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
     private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
-    private val restoredTimerSnapshot = TimerSnapshotStore(application).load()
+    private val timerSnapshotStore = TimerSnapshotStore(application)
+    private val restoredTimerSnapshot = timerSnapshotStore.load()
+    private val restoredTimer = restoredTimerSnapshot?.let {
+        TimerAutomationReconciler.reconcile(it, initialTimerSettings, System.currentTimeMillis())
+    }.also { reconciled ->
+        if (reconciled != null && reconciled.transitions.isNotEmpty() && restoredTimerSnapshot != null) {
+            timerSnapshotStore.save(
+                restoredTimerSnapshot.copy(
+                    revision = restoredTimerSnapshot.revision + 1,
+                    state = reconciled.state,
+                    secondsRemaining = reconciled.secondsRemaining,
+                    isRunning = reconciled.isRunning,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                    completedFocusSessions = reconciled.completedFocusSessions
+                )
+            )
+        }
+    }
     private val timerSettingsUpdates = Channel<TimerSettings>(Channel.CONFLATED)
+    private val transitionNotifier = SessionTransitionNotifier(application)
 
     val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -60,12 +80,13 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val engine = PomodoroEngine(viewModelScope, initialTimerSettings).apply {
-        restoredTimerSnapshot?.let { snapshot ->
+        restoredTimer?.let { timer ->
             syncState(
-                snapshot.state,
-                TimerSnapshotResolver.remainingAt(snapshot, System.currentTimeMillis()),
-                snapshot.isRunning
+                timer.state,
+                timer.secondsRemaining,
+                timer.isRunning
             )
+            restoreCompletedFocusSessions(timer.completedFocusSessions)
         }
     }
 
@@ -144,6 +165,18 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     init {
         viewModelScope.launch(Dispatchers.IO) {
             for (settings in timerSettingsUpdates) timerSettingsStore.write(settings)
+        }
+
+        viewModelScope.launch {
+            engine.transitionEvents.collect { transition ->
+                if (transition.cause == TimerTransitionCause.COMPLETED) {
+                    transitionNotifier.notify(transition, _timerSettings.value)
+                }
+            }
+        }
+
+        restoredTimer?.transitions?.lastOrNull()?.let { transition ->
+            transitionNotifier.notify(transition, initialTimerSettings)
         }
 
         // Check for pending audits
@@ -273,11 +306,27 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         resetTimer = false
     )
 
+    fun setTransitionSoundEnabled(enabled: Boolean) = updateTimerSetting(
+        _timerSettings.value.copy(transitionSoundEnabled = enabled),
+        resetTimer = false
+    )
+
+    fun setTransitionNotificationEnabled(enabled: Boolean) = updateTimerSetting(
+        _timerSettings.value.copy(transitionNotificationEnabled = enabled),
+        resetTimer = false
+    )
+
+    fun setTransitionHapticEnabled(enabled: Boolean) = updateTimerSetting(
+        _timerSettings.value.copy(transitionHapticEnabled = enabled),
+        resetTimer = false
+    )
+
     private fun updateTimerSetting(settings: TimerSettings, resetTimer: Boolean) {
         val sanitized = settings.sanitized()
         _timerSettings.value = sanitized
         engine.applySettings(sanitized, resetTimer)
         timerSettingsUpdates.trySend(sanitized)
+        wearableSyncManager.pushStateToWearable(force = true)
     }
 
     fun setTimerState(state: PomodoroState) {

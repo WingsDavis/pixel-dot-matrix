@@ -24,7 +24,8 @@ class TimerSnapshotStore(context: Context) {
             isRunning = preferences.getBoolean(KEY_IS_RUNNING, false),
             updatedAtEpochMs = preferences.getLong(KEY_UPDATED_AT, 0L),
             anchorElapsedRealtimeMs = preferences.getLong(KEY_ANCHOR, 0L),
-            leaseExpiresAtEpochMs = preferences.getLong(KEY_LEASE_EXPIRES_AT, 0L)
+            leaseExpiresAtEpochMs = preferences.getLong(KEY_LEASE_EXPIRES_AT, 0L),
+            completedFocusSessions = preferences.getInt(KEY_COMPLETED_FOCUS_SESSIONS, 0).coerceAtLeast(0)
         )
     }
 
@@ -40,6 +41,7 @@ class TimerSnapshotStore(context: Context) {
             .putLong(KEY_UPDATED_AT, snapshot.updatedAtEpochMs)
             .putLong(KEY_ANCHOR, snapshot.anchorElapsedRealtimeMs)
             .putLong(KEY_LEASE_EXPIRES_AT, snapshot.leaseExpiresAtEpochMs)
+            .putInt(KEY_COMPLETED_FOCUS_SESSIONS, snapshot.completedFocusSessions)
             .apply()
     }
 
@@ -55,6 +57,7 @@ class TimerSnapshotStore(context: Context) {
         private const val KEY_UPDATED_AT = "updated_at"
         private const val KEY_ANCHOR = "anchor"
         private const val KEY_LEASE_EXPIRES_AT = "lease_expires_at"
+        private const val KEY_COMPLETED_FOCUS_SESSIONS = "completed_focus_sessions"
         private const val SOURCE_PHONE = "phone"
     }
 }

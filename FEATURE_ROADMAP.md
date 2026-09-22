@@ -20,12 +20,12 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
-| 1. State and reliability | 1-5 | 4 | 0 | 0 | 1 |
+| 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
 | 2. Phone productivity | 6-10 | 0 | 1 | 0 | 4 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **4** | **10** | **0** | **6** |
+| **Total** | **20** | **5** | **10** | **0** | **5** |
 
 ## Master Tracker
 
@@ -35,7 +35,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 2 | Shared timer authority | P0 | `[x]` | 1 |
 | 3 | Reliable offline synchronization | P0 | `[x]` | 2 |
 | 4 | Watch-face configuration persistence | P0 | `[x]` | 1, 3 |
-| 5 | Session automation | P1 | `[ ]` | 1, 2 |
+| 5 | Session automation | P1 | `[x]` | 1, 2 |
 | 6 | Compact task queue | P1 | `[ ]` | 1 |
 | 7 | Daily focus target | P1 | `[ ]` | 1, 2 |
 | 8 | Useful insights | P1 | `[~]` | 7 |
@@ -127,7 +127,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - [x] The phone shows when local and watch configurations differ.
 - [x] Reinstalling/updating WFF does not silently erase the phone preset.
 
-### 5. Session Automation `[ ]`
+### 5. Session Automation `[x]`
 
 **Scope**
 - Add automatic break start and automatic focus restart toggles.
@@ -136,10 +136,10 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Add per-transition sound, notification, and haptic preferences.
 
 **Acceptance criteria**
-- [ ] Manual Next always cycles Focus -> Short -> Long -> Focus.
-- [ ] Automatic completion follows configured cadence.
-- [ ] Automation works with the app backgrounded and after process recreation.
-- [ ] Phone and watch transition once, without duplicate notifications.
+- [x] Manual Next always cycles Focus -> Short -> Long -> Focus.
+- [x] Automatic completion follows configured cadence.
+- [x] Automation works with the app backgrounded and after process recreation.
+- [x] Phone and watch transition once, without duplicate notifications.
 
 ## Phase 2: Phone Productivity
 

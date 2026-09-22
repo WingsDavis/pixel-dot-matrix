@@ -15,7 +15,8 @@ data class TimerSnapshot(
     val isRunning: Boolean,
     val updatedAtEpochMs: Long,
     val anchorElapsedRealtimeMs: Long,
-    val leaseExpiresAtEpochMs: Long = 0L
+    val leaseExpiresAtEpochMs: Long = 0L,
+    val completedFocusSessions: Int = 0
 )
 
 data class TimerCommand(

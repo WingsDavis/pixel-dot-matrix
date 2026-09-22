@@ -186,6 +186,21 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - Left-slot mode, bottom-right mode, and ambient style are editable and included in previews, drafts, presets, replay, reset, and sync payloads.
   - The phone model is independent of the WFF package lifecycle, so reinstalling or updating the watch face cannot erase the saved phone configuration.
 
+### Feature 12: Session Automation
+* **Engine transitions (`PomodoroEngine.kt`)**:
+  - Automatic focus completion follows the configured 2-8 session long-break cadence.
+  - Auto-start Breaks and Auto-start Focus independently control whether the next phase begins immediately.
+  - Manual Next remains an explicit Focus -> Short Break -> Long Break -> Focus cycle and does not depend on automatic cadence.
+  - Completion emits one typed transition event; manual transitions are marked separately and do not produce completion alerts.
+* **Process recreation (`TimerAutomationReconciler.kt`)**:
+  - Completed-focus cadence progress is part of the authoritative timer snapshot and survives phone and watch process recreation.
+  - Elapsed background time can advance across multiple auto-started phases, then persists the reconciled snapshot before synchronization resumes.
+  - Standalone Wear leases use the same cadence and auto-start behavior and publish one resulting snapshot on reconnection.
+* **Transition preferences and feedback**:
+  - DataStore persists independent sound, notification, and haptic toggles alongside the automation settings.
+  - The phone posts one transition notification and optional local sound/haptic; the watch uses its existing single phase-transition haptic.
+  - Notification channels disable their own sound and vibration so enabling all three preferences does not duplicate feedback.
+
 ---
 
 ## 3. Development Reference

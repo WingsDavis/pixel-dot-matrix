@@ -20,6 +20,9 @@ data class TimerSettings(
     val longBreakCadence: Int = DEFAULT_LONG_BREAK_CADENCE,
     val autoStartBreaks: Boolean = false,
     val autoStartFocus: Boolean = false,
+    val transitionSoundEnabled: Boolean = true,
+    val transitionNotificationEnabled: Boolean = true,
+    val transitionHapticEnabled: Boolean = true,
     val schemaVersion: Int = CURRENT_SCHEMA_VERSION
 ) {
     fun sanitized() = copy(
@@ -72,6 +75,9 @@ class TimerSettingsStore(
     suspend fun setLongBreakCadence(cadence: Int) = update(LONG_BREAK_CADENCE, cadence)
     suspend fun setAutoStartBreaks(enabled: Boolean) = update(AUTO_START_BREAKS, enabled)
     suspend fun setAutoStartFocus(enabled: Boolean) = update(AUTO_START_FOCUS, enabled)
+    suspend fun setTransitionSoundEnabled(enabled: Boolean) = update(TRANSITION_SOUND, enabled)
+    suspend fun setTransitionNotificationEnabled(enabled: Boolean) = update(TRANSITION_NOTIFICATION, enabled)
+    suspend fun setTransitionHapticEnabled(enabled: Boolean) = update(TRANSITION_HAPTIC, enabled)
 
     private suspend fun update(key: Preferences.Key<Int>, value: Int) {
         dataStore.edit { preferences ->
@@ -95,6 +101,9 @@ class TimerSettingsStore(
             preferences[LONG_BREAK_CADENCE] = settings.longBreakCadence
             preferences[AUTO_START_BREAKS] = settings.autoStartBreaks
             preferences[AUTO_START_FOCUS] = settings.autoStartFocus
+            preferences[TRANSITION_SOUND] = settings.transitionSoundEnabled
+            preferences[TRANSITION_NOTIFICATION] = settings.transitionNotificationEnabled
+            preferences[TRANSITION_HAPTIC] = settings.transitionHapticEnabled
             preferences[SCHEMA_VERSION] = TimerSettings.CURRENT_SCHEMA_VERSION
         }
     }
@@ -106,6 +115,9 @@ class TimerSettingsStore(
         longBreakCadence = preferences[LONG_BREAK_CADENCE] ?: TimerSettings.DEFAULT_LONG_BREAK_CADENCE,
         autoStartBreaks = preferences[AUTO_START_BREAKS] ?: false,
         autoStartFocus = preferences[AUTO_START_FOCUS] ?: false,
+        transitionSoundEnabled = preferences[TRANSITION_SOUND] ?: true,
+        transitionNotificationEnabled = preferences[TRANSITION_NOTIFICATION] ?: true,
+        transitionHapticEnabled = preferences[TRANSITION_HAPTIC] ?: true,
         schemaVersion = preferences[SCHEMA_VERSION] ?: 0
     ).sanitized()
 
@@ -123,5 +135,8 @@ class TimerSettingsStore(
         val LONG_BREAK_CADENCE = intPreferencesKey("long_break_cadence")
         val AUTO_START_BREAKS = booleanPreferencesKey("auto_start_breaks")
         val AUTO_START_FOCUS = booleanPreferencesKey("auto_start_focus")
+        val TRANSITION_SOUND = booleanPreferencesKey("transition_sound")
+        val TRANSITION_NOTIFICATION = booleanPreferencesKey("transition_notification")
+        val TRANSITION_HAPTIC = booleanPreferencesKey("transition_haptic")
     }
 }

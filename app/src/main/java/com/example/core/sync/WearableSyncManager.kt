@@ -115,14 +115,14 @@ class WearableSyncManager(
      * Standard path used for sync: /pomodoro/state
      */
     @Synchronized
-    fun pushStateToWearable() {
+    fun pushStateToWearable(force: Boolean = false) {
         val now = System.currentTimeMillis()
         val expectedSeconds = TimerSnapshotResolver.remainingAt(currentSnapshot, now)
         val hasMeaningfulChange = currentSnapshot.authority != TimerAuthority.PHONE ||
             currentSnapshot.state != engine.currentState.value ||
             currentSnapshot.isRunning != engine.isRunning.value ||
             kotlin.math.abs(expectedSeconds - engine.secondsRemaining.value) > 1
-        if (hasPublishedInProcess && !hasMeaningfulChange) return
+        if (hasPublishedInProcess && !hasMeaningfulChange && !force) return
         if (lastPublishedState != engine.currentState.value) {
             timerSessionId = UUID.randomUUID().toString()
             lastPublishedState = engine.currentState.value
@@ -150,6 +150,10 @@ class WearableSyncManager(
                     dataMap.putInt(KEY_FOCUS_DURATION, engine.focusDuration)
                     dataMap.putInt(KEY_SHORT_BREAK_DURATION, engine.shortBreakDuration)
                     dataMap.putInt(KEY_LONG_BREAK_DURATION, engine.longBreakDuration)
+                    dataMap.putInt(KEY_LONG_BREAK_CADENCE, engine.longBreakCadence)
+                    dataMap.putInt(KEY_COMPLETED_FOCUS_SESSIONS, engine.completedFocusSessions)
+                    dataMap.putBoolean(KEY_AUTO_START_BREAKS, engine.autoStartBreaksEnabled)
+                    dataMap.putBoolean(KEY_AUTO_START_FOCUS, engine.autoStartFocusEnabled)
                     dataMap.putInt("daily_focus_minutes", goalPrefs.getInt("daily_focus_minutes", 0))
                     dataMap.putInt("daily_target_minutes", goalPrefs.getInt("daily_target_minutes", 120))
                     // Ensure the update is always detected even if primitive values are same
@@ -368,7 +372,8 @@ class WearableSyncManager(
                             isRunning = isRunning,
                             updatedAtEpochMs = dataMap.getLong(KEY_TIMESTAMP, 0L),
                             anchorElapsedRealtimeMs = dataMap.getLong(KEY_ANCHOR_ELAPSED_REALTIME, 0L),
-                            leaseExpiresAtEpochMs = dataMap.getLong(KEY_LEASE_EXPIRES_AT, 0L)
+                            leaseExpiresAtEpochMs = dataMap.getLong(KEY_LEASE_EXPIRES_AT, 0L),
+                            completedFocusSessions = dataMap.getInt(KEY_COMPLETED_FOCUS_SESSIONS, 0)
                         )
                         val resolution = TimerSnapshotResolver.resolve(
                             local = currentSnapshot,
@@ -386,6 +391,7 @@ class WearableSyncManager(
                                     System.currentTimeMillis()
                                 )
                                 engine.syncState(state, reconciledSeconds, isRunning)
+                                engine.restoreCompletedFocusSessions(incoming.completedFocusSessions)
                             }
                         } else if (resolution is SnapshotResolution.Reject) {
                             Log.d(TAG, "Rejected Wear snapshot revision=${incoming.revision}: ${resolution.reason}")
@@ -578,7 +584,8 @@ class WearableSyncManager(
         secondsRemaining = engine.secondsRemaining.value,
         isRunning = engine.isRunning.value,
         updatedAtEpochMs = System.currentTimeMillis(),
-        anchorElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        anchorElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+        completedFocusSessions = engine.completedFocusSessions
     )
 
     @Synchronized
@@ -643,6 +650,10 @@ class WearableSyncManager(
         const val KEY_FOCUS_DURATION = "focus_duration"
         const val KEY_SHORT_BREAK_DURATION = "short_break_duration"
         const val KEY_LONG_BREAK_DURATION = "long_break_duration"
+        const val KEY_LONG_BREAK_CADENCE = "long_break_cadence"
+        const val KEY_COMPLETED_FOCUS_SESSIONS = "completed_focus_sessions"
+        const val KEY_AUTO_START_BREAKS = "auto_start_breaks"
+        const val KEY_AUTO_START_FOCUS = "auto_start_focus"
         const val SOURCE_PHONE = "phone"
         const val SOURCE_WEAR = "wear"
         private const val MAX_HANDLED_COMMANDS = 256

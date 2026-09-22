@@ -283,6 +283,21 @@ fun SetupScreen(
                     checked = timerSettings.autoStartFocus,
                     onCheckedChange = viewModel::setAutoStartFocus
                 )
+                TimerPreferenceSwitch(
+                    title = "Transition Sound",
+                    checked = timerSettings.transitionSoundEnabled,
+                    onCheckedChange = viewModel::setTransitionSoundEnabled
+                )
+                TimerPreferenceSwitch(
+                    title = "Transition Notification",
+                    checked = timerSettings.transitionNotificationEnabled,
+                    onCheckedChange = viewModel::setTransitionNotificationEnabled
+                )
+                TimerPreferenceSwitch(
+                    title = "Transition Haptic",
+                    checked = timerSettings.transitionHapticEnabled,
+                    onCheckedChange = viewModel::setTransitionHapticEnabled
+                )
             }
         }
 

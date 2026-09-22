@@ -22,6 +22,9 @@ class TimerSettingsStoreTest {
         store.setFocusDuration(40 * 60)
         store.setLongBreakCadence(6)
         store.setAutoStartBreaks(true)
+        store.setTransitionSoundEnabled(false)
+        store.setTransitionNotificationEnabled(false)
+        store.setTransitionHapticEnabled(false)
 
         val restored = store.loadAndMigrate()
         assertEquals(40 * 60, restored.focusDurationSeconds)
@@ -29,6 +32,9 @@ class TimerSettingsStoreTest {
         assertEquals(TimerSettings.DEFAULT_SHORT_BREAK_SECONDS, restored.shortBreakDurationSeconds)
         assertEquals(true, restored.autoStartBreaks)
         assertFalse(restored.autoStartFocus)
+        assertFalse(restored.transitionSoundEnabled)
+        assertFalse(restored.transitionNotificationEnabled)
+        assertFalse(restored.transitionHapticEnabled)
     }
 
     @Test
