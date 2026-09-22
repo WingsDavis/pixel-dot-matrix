@@ -72,6 +72,12 @@ class WearSyncService : WearableListenerService() {
                     androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
                         .create(applicationContext, customComponentName)
                         .requestUpdateAll()
+                } else if (item.uri.path == "/pomodoro/tasks") {
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE).edit()
+                        .putString("current_task", dataMap.getString("current_task").orEmpty().take(40))
+                        .putString("next_task", dataMap.getString("next_task").orEmpty().take(40))
+                        .apply()
                 } else if (
                     item.uri.path == PATH_WATCHFACE_CONFIG_LEGACY ||
                     item.uri.path == PATH_WATCHFACE_CONFIG_V2

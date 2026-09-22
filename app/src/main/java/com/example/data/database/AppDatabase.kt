@@ -7,15 +7,17 @@ import androidx.room.RoomDatabase
 import com.example.data.entity.SessionLogEntity
 import com.example.data.entity.PanicLogEntity
 import com.example.data.entity.SyncOutboxEntity
+import com.example.data.entity.FocusTaskEntity
 
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class], version = 6, exportSchema = false)
+@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class, FocusTaskEntity::class], version = 7, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun panicDao(): PanicDao
     abstract fun syncOutboxDao(): SyncOutboxDao
+    abstract fun focusTaskDao(): FocusTaskDao
 
     companion object {
         @Volatile
@@ -28,7 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "panic_pomodoro_db"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
@@ -81,5 +83,26 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL(CREATE_INCIDENT_ID_INDEX)
             }
         }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(ADD_SESSION_TASK_ID)
+                database.execSQL(CREATE_FOCUS_TASKS_TABLE)
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_focus_tasks_status ON focus_tasks(status)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_focus_tasks_sortOrder ON focus_tasks(sortOrder)")
+            }
+        }
+
+        const val ADD_SESSION_TASK_ID = "ALTER TABLE session_logs ADD COLUMN taskId TEXT"
+        val CREATE_FOCUS_TASKS_TABLE = """CREATE TABLE IF NOT EXISTS focus_tasks (
+            id TEXT NOT NULL PRIMARY KEY,
+            title TEXT NOT NULL,
+            sortOrder INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            estimateSessions INTEGER NOT NULL,
+            completedSessions INTEGER NOT NULL,
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL
+        )""".trimIndent()
     }
 }

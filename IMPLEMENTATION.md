@@ -201,6 +201,19 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - The phone posts one transition notification and optional local sound/haptic; the watch uses its existing single phase-transition haptic.
   - Notification channels disable their own sound and vibration so enabling all three preferences does not duplicate feedback.
 
+### Feature 13: Compact Task Queue
+* **Room model (`FocusTaskEntity.kt` and `FocusTaskDao.kt`)**:
+  - Stores stable UUID, title, order, pending/completed/skipped status, session estimate, completed-session count, and timestamps.
+  - Database migration 6 -> 7 adds the queue and a nullable stable `taskId` to session history without adding a foreign key, so deleting a task cannot invalidate prior sessions.
+* **Queue behavior (`FocusTaskRepository.kt` and `PomodoroViewModel.kt`)**:
+  - Supports compact add, select, reorder, complete, skip, and delete actions with persistent selected-task identity.
+  - Each completed focus increments the selected task and advances only after its estimated session count is reached.
+  - Session records store both stable task ID and title snapshot, preserving readable history after rename or deletion.
+* **Phone and Wear UI**:
+  - The timer screen replaces the ephemeral task text field with a dense reusable queue, estimate stepper, progress label, and icon actions.
+  - Only selected and next task summaries are published as a persistent DataItem.
+  - Wear quick actions show single-line ellipsized summaries capped at 40 characters.
+
 ---
 
 ## 3. Development Reference

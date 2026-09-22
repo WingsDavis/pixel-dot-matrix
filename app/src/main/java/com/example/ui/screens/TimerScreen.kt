@@ -11,6 +11,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RestartAlt
@@ -30,6 +36,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.viewmodel.PomodoroViewModel
@@ -39,6 +46,7 @@ import com.example.ui.components.BentoPillButton
 import com.example.ui.theme.CardBlack
 import com.example.ui.theme.CardWhite
 import com.example.ui.theme.TealAccent
+import com.example.data.entity.FocusTaskEntity
 
 @Composable
 fun TimerScreen(
@@ -48,7 +56,8 @@ fun TimerScreen(
     val currentState by viewModel.currentState.collectAsState()
     val secondsRemaining by viewModel.secondsRemaining.collectAsState()
     val isRunning by viewModel.isRunning.collectAsState()
-    val currentTaskName by viewModel.currentTaskName.collectAsState()
+    val focusTasks by viewModel.focusTasks.collectAsState()
+    val selectedTask by viewModel.selectedTask.collectAsState()
 
     val totalDuration = when (currentState) {
         com.example.core.timer.PomodoroState.FOCUS -> viewModel.engine.focusDuration
@@ -90,20 +99,15 @@ fun TimerScreen(
     ) {
         Spacer(modifier = Modifier.height(12.dp))
 
-        OutlinedTextField(
-            value = currentTaskName,
-            onValueChange = { viewModel.updateTaskName(it) },
-            placeholder = { Text("What are you focusing on?", color = CardWhite.copy(alpha = 0.5f)) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = TealAccent,
-                unfocusedBorderColor = CardWhite.copy(alpha = 0.3f),
-                focusedTextColor = CardWhite,
-                unfocusedTextColor = CardWhite,
-                cursorColor = TealAccent
-            ),
-            shape = RoundedCornerShape(16.dp),
-            singleLine = true
+        CompactTaskQueue(
+            tasks = focusTasks,
+            selectedTaskId = selectedTask?.id,
+            onAdd = viewModel::addTask,
+            onSelect = viewModel::selectTask,
+            onMove = viewModel::moveTask,
+            onComplete = viewModel::completeTask,
+            onSkip = viewModel::skipTask,
+            onDelete = viewModel::deleteTask
         )
 
         // Main Timer Card (Teal Bento Style)
@@ -273,4 +277,109 @@ fun TimerScreen(
         Spacer(modifier = Modifier.height(100.dp))
 
     }
+}
+
+@Composable
+private fun CompactTaskQueue(
+    tasks: List<FocusTaskEntity>,
+    selectedTaskId: String?,
+    onAdd: (String, Int) -> Unit,
+    onSelect: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
+    onComplete: (String) -> Unit,
+    onSkip: (String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var draft by remember { mutableStateOf("") }
+    var estimate by remember { mutableIntStateOf(1) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Add a focus task", color = CardWhite.copy(alpha = 0.5f)) },
+                modifier = Modifier.weight(1f),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = TealAccent,
+                    unfocusedBorderColor = CardWhite.copy(alpha = 0.3f),
+                    focusedTextColor = CardWhite,
+                    unfocusedTextColor = CardWhite,
+                    cursorColor = TealAccent
+                ),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
+            )
+            IconButton(onClick = { estimate = (estimate - 1).coerceAtLeast(1) }) {
+                Icon(Icons.Default.Remove, contentDescription = "Reduce estimate", tint = CardWhite)
+            }
+            Text("${estimate}x", color = TealAccent, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
+            IconButton(onClick = { estimate = (estimate + 1).coerceAtMost(12) }) {
+                Icon(Icons.Default.Add, contentDescription = "Increase estimate", tint = CardWhite)
+            }
+            IconButton(onClick = {
+                if (draft.isNotBlank()) {
+                    onAdd(draft, estimate)
+                    draft = ""
+                    estimate = 1
+                }
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "Add task", tint = TealAccent)
+            }
+        }
+
+        tasks.forEachIndexed { index, task ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (task.id == selectedTaskId) TealAccent.copy(alpha = 0.16f) else CardWhite.copy(alpha = 0.06f),
+                        RoundedCornerShape(6.dp)
+                    )
+                    .clickable { onSelect(task.id) }
+                    .padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(task.title, color = CardWhite, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                    Text(
+                        "${task.completedSessions}/${task.estimateSessions} sessions",
+                        color = CardWhite.copy(alpha = 0.5f),
+                        fontSize = 10.sp
+                    )
+                }
+                TaskIconButton(onClick = { onMove(task.id, -1) }, enabled = index > 0) {
+                    Icon(Icons.Default.ArrowUpward, contentDescription = "Move task up", tint = CardWhite)
+                }
+                TaskIconButton(onClick = { onMove(task.id, 1) }, enabled = index < tasks.lastIndex) {
+                    Icon(Icons.Default.ArrowDownward, contentDescription = "Move task down", tint = CardWhite)
+                }
+                TaskIconButton(onClick = { onComplete(task.id) }) {
+                    Icon(Icons.Default.Check, contentDescription = "Complete task", tint = TealAccent)
+                }
+                TaskIconButton(onClick = { onSkip(task.id) }) {
+                    Icon(Icons.Default.SkipNext, contentDescription = "Skip task", tint = Color(0xFFFFCA28))
+                }
+                TaskIconButton(onClick = { onDelete(task.id) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete task", tint = Color(0xFFEF5350))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskIconButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(7.dp),
+        contentAlignment = Alignment.Center,
+        content = content
+    )
 }

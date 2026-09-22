@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
@@ -72,6 +73,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private val _stateName = mutableStateOf("FOCUS")
     private val _secondsRemaining = mutableStateOf(1500)
     private val _isRunning = mutableStateOf(false)
+    private val _currentTaskSummary = mutableStateOf("")
+    private val _nextTaskSummary = mutableStateOf("")
     private var timerRevision = -1L
     private var timerSessionId = UUID.randomUUID().toString()
     private var timerUpdatedAtEpochMs = 0L
@@ -135,6 +138,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val stateName by _stateName
                 val secondsRemaining by _secondsRemaining
                 val isRunning by _isRunning
+                val currentTaskSummary by _currentTaskSummary
+                val nextTaskSummary by _nextTaskSummary
                 val heartRate by _heartRate
                 val heartRateThreshold by _heartRateThreshold
                 val stepsTakenInPanic by _stepsTakenInPanic
@@ -359,6 +364,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         4 -> {
                             WearQuickActions(
                                 haptics = wearHaptics,
+                                currentTask = currentTaskSummary,
+                                nextTask = nextTaskSummary,
                                 onFocus = { sendTimerCommand("START_FOCUS") },
                                 onBreak = { sendTimerCommand("START_SHORT_BREAK") },
                                 onDistraction = { sendMessageToPhone("/incident/mark", "DISTRACTION") }
@@ -592,6 +599,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
                     saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
                     Log.d(TAG, "Watch state updated from phone: state=${_stateName.value}, running=${_isRunning.value}, panic=$isPanic")
+                } else if (item.uri.path == "/pomodoro/tasks") {
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    _currentTaskSummary.value = dataMap.getString("current_task").orEmpty().take(40)
+                    _nextTaskSummary.value = dataMap.getString("next_task").orEmpty().take(40)
                 }
             }
         }
@@ -648,6 +659,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         completedFocusSessions = prefs.getInt("completed_focus_sessions", 0).coerceIn(0, longBreakCadence - 1)
         autoStartBreaks = prefs.getBoolean("auto_start_breaks", false)
         autoStartFocus = prefs.getBoolean("auto_start_focus", false)
+        _currentTaskSummary.value = prefs.getString("current_task", "").orEmpty().take(40)
+        _nextTaskSummary.value = prefs.getString("next_task", "").orEmpty().take(40)
         if (_isRunning.value && hasWearAuthority) {
             var elapsedSeconds = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1_000L).toInt()
             while (_isRunning.value && elapsedSeconds >= _secondsRemaining.value) {
@@ -905,6 +918,8 @@ fun FrustrationWarningScreen(
 @Composable
 private fun WearQuickActions(
     haptics: WearHaptics,
+    currentTask: String,
+    nextTask: String,
     onFocus: () -> Unit,
     onBreak: () -> Unit,
     onDistraction: () -> Unit
@@ -930,6 +945,30 @@ private fun WearQuickActions(
             fontSize = 17.sp,
             color = CardWhite
         )
+        if (currentTask.isNotBlank()) {
+            Text(
+                text = currentTask,
+                fontFamily = DotMatrixFont,
+                fontSize = 11.sp,
+                color = TealAccent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+            if (nextTask.isNotBlank()) {
+                Text(
+                    text = "NEXT  $nextTask",
+                    fontFamily = DotMatrixFont,
+                    fontSize = 9.sp,
+                    color = CardWhite.copy(alpha = 0.5f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
         Spacer(Modifier.height(10.dp))
         DotMatrixActionButton("FOCUS", Icons.Default.PlayArrow, Color(0xFF42A5F5), onFocus)
         Spacer(Modifier.height(7.dp))

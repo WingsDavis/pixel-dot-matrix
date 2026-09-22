@@ -216,6 +216,18 @@ class WearableSyncManager(
         }
     }
 
+    fun pushTaskSummaries(current: String?, next: String?) {
+        scope.launch(Dispatchers.IO) {
+            val request = PutDataMapRequest.create(PATH_TASK_SUMMARIES).apply {
+                dataMap.putString(KEY_CURRENT_TASK, current.orEmpty().take(MAX_WEAR_TASK_LENGTH))
+                dataMap.putString(KEY_NEXT_TASK, next.orEmpty().take(MAX_WEAR_TASK_LENGTH))
+                dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
+            }.asPutDataRequest().setUrgent()
+            runCatching { dataClient.putDataItem(request).await() }
+                .onFailure { error -> Log.e(TAG, "Failed to sync task summaries", error) }
+        }
+    }
+
     /**
      * Pushes the selected watch face style preference to the watch.
      */
@@ -614,6 +626,7 @@ class WearableSyncManager(
         const val PATH_SYNC_ACK = "/pomodoro/sync_ack"
         const val PATH_TIMER_COMMAND_ACK = "/pomodoro/control_ack"
         const val PATH_INCIDENT_STATUS = "/incident/status"
+        const val PATH_TASK_SUMMARIES = "/pomodoro/tasks"
 
         const val WATCHFACE_CONFIG_SCHEMA_VERSION = 2
 
@@ -654,9 +667,12 @@ class WearableSyncManager(
         const val KEY_COMPLETED_FOCUS_SESSIONS = "completed_focus_sessions"
         const val KEY_AUTO_START_BREAKS = "auto_start_breaks"
         const val KEY_AUTO_START_FOCUS = "auto_start_focus"
+        const val KEY_CURRENT_TASK = "current_task"
+        const val KEY_NEXT_TASK = "next_task"
         const val SOURCE_PHONE = "phone"
         const val SOURCE_WEAR = "wear"
         private const val MAX_HANDLED_COMMANDS = 256
         private const val OUTBOX_RETRY_INTERVAL_MS = 15_000L
+        private const val MAX_WEAR_TASK_LENGTH = 40
     }
 }

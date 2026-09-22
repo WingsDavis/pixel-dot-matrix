@@ -21,11 +21,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
 | 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
-| 2. Phone productivity | 6-10 | 0 | 1 | 0 | 4 |
+| 2. Phone productivity | 6-10 | 1 | 1 | 0 | 3 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **5** | **10** | **0** | **5** |
+| **Total** | **20** | **6** | **10** | **0** | **4** |
 
 ## Master Tracker
 
@@ -36,7 +36,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 3 | Reliable offline synchronization | P0 | `[x]` | 2 |
 | 4 | Watch-face configuration persistence | P0 | `[x]` | 1, 3 |
 | 5 | Session automation | P1 | `[x]` | 1, 2 |
-| 6 | Compact task queue | P1 | `[ ]` | 1 |
+| 6 | Compact task queue | P1 | `[x]` | 1 |
 | 7 | Daily focus target | P1 | `[ ]` | 1, 2 |
 | 8 | Useful insights | P1 | `[~]` | 7 |
 | 9 | Backup and export | P2 | `[ ]` | 1, 8 |
@@ -143,7 +143,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 ## Phase 2: Phone Productivity
 
-### 6. Compact Task Queue `[ ]`
+### 6. Compact Task Queue `[x]`
 
 **Scope**
 - Add a Room task entity with title, order, status, estimate, and timestamps.
@@ -152,10 +152,10 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Sync only current/next task summaries to Wear.
 
 **Acceptance criteria**
-- [ ] Users can prepare and reorder tasks quickly.
-- [ ] Completing a focus session can advance to the next task.
-- [ ] Deleted tasks do not invalidate historical session records.
-- [ ] Long titles truncate safely on the watch.
+- [x] Users can prepare and reorder tasks quickly.
+- [x] Completing a focus session can advance to the next task.
+- [x] Deleted tasks do not invalidate historical session records.
+- [x] Long titles truncate safely on the watch.
 
 ### 7. Daily Focus Target `[ ]`
 

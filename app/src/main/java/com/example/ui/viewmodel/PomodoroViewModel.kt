@@ -20,7 +20,9 @@ import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
 import com.example.data.entity.IncidentStatus
 import com.example.data.entity.SessionLogEntity
+import com.example.data.entity.FocusTaskEntity
 import com.example.data.repository.PomodoroRepository
+import com.example.data.repository.FocusTaskRepository
 import com.example.core.sync.WearableSyncManager
 import android.content.Intent
 import android.graphics.Bitmap
@@ -49,6 +51,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     private val database = AppDatabase.getDatabase(application)
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
+    private val taskRepository = FocusTaskRepository(database.focusTaskDao())
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
     private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
@@ -78,6 +81,14 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     val panicLogs: StateFlow<List<PanicLogEntity>> = repository.allPanicLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val focusTasks: StateFlow<List<FocusTaskEntity>> = taskRepository.pendingTasks
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val taskSelectionPreferences = application.getSharedPreferences("task_selection", Context.MODE_PRIVATE)
+    private val _selectedTaskId = MutableStateFlow(taskSelectionPreferences.getString("selected_task_id", null))
+    val selectedTask: StateFlow<FocusTaskEntity?> = combine(focusTasks, _selectedTaskId) { tasks, selectedId ->
+        tasks.firstOrNull { it.id == selectedId } ?: tasks.firstOrNull()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val engine = PomodoroEngine(viewModelScope, initialTimerSettings).apply {
         restoredTimer?.let { timer ->
@@ -117,13 +128,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val _isDnsSinkholeActive = MutableStateFlow(false)
     val isDnsSinkholeActive: StateFlow<Boolean> = _isDnsSinkholeActive.asStateFlow()
 
-    // Contextual Task Tracking
-    private val _currentTaskName = MutableStateFlow("")
-    val currentTaskName: StateFlow<String> = _currentTaskName.asStateFlow()
-
-    fun updateTaskName(name: String) {
-        _currentTaskName.value = name
-    }
+    val currentTaskName: StateFlow<String> = selectedTask.map { it?.title.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    private var activeFocusTaskSnapshot: FocusTaskEntity? = null
 
     // On-Device Predictive Vulnerability Engine
     val predictiveVulnerabilityText: StateFlow<String> = panicLogs.map { logs ->
@@ -171,7 +178,19 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             engine.transitionEvents.collect { transition ->
                 if (transition.cause == TimerTransitionCause.COMPLETED) {
                     transitionNotifier.notify(transition, _timerSettings.value)
+                    if (transition.from == PomodoroState.FOCUS) recordFocusForSelectedTask()
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            combine(focusTasks, selectedTask) { tasks, selected -> tasks to selected }.collect { (tasks, selected) ->
+                if (selected != null && selected.id != _selectedTaskId.value) selectTask(selected.id)
+                val selectedIndex = tasks.indexOfFirst { it.id == selected?.id }
+                wearableSyncManager.pushTaskSummaries(
+                    selected?.title,
+                    tasks.getOrNull(selectedIndex + 1)?.title
+                )
             }
         }
 
@@ -193,6 +212,18 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                 .collect {
                     wearableSyncManager.pushStateToWearable()
                 }
+        }
+
+        viewModelScope.launch {
+            var previousState = currentState.value
+            var previousRunning = false
+            combine(currentState, isRunning) { state, running -> state to running }.collect { (state, running) ->
+                if (state == PomodoroState.FOCUS && running && (previousState != PomodoroState.FOCUS || !previousRunning)) {
+                    activeFocusTaskSnapshot = selectedTask.value
+                }
+                previousState = state
+                previousRunning = running
+            }
         }
 
         // Collect engine state to handle database logging when focus session finishes
@@ -219,10 +250,12 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                                 startTimeMillis = startTime,
                                 durationSeconds = duration,
                                 status = status,
-                                taskName = if (_currentTaskName.value.isNotBlank()) _currentTaskName.value else null
+                                taskId = (activeFocusTaskSnapshot ?: selectedTask.value)?.id,
+                                taskName = (activeFocusTaskSnapshot ?: selectedTask.value)?.title
                             )
                         )
                     }
+                    activeFocusTaskSnapshot = null
                 }
 
                 if (state == PomodoroState.PANIC_MODE) {
@@ -244,7 +277,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                             heartRateSpike = 138, // simulated heart rate spike triggering this
                             stepsTaken = 0,
                             resolvedAt = null,
-                            taskName = if (_currentTaskName.value.isNotBlank()) _currentTaskName.value else null
+                            taskName = selectedTask.value?.title
                         )
                     )
                 } else if (lastState == PomodoroState.PANIC_MODE) {
@@ -339,6 +372,52 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         engine.syncState(state, duration, false)
     }
 
+    fun addTask(title: String, estimateSessions: Int = 1) {
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            val task = taskRepository.add(title, estimateSessions)
+            if (selectedTask.value == null) selectTask(task.id)
+        }
+    }
+
+    fun selectTask(id: String) {
+        _selectedTaskId.value = id
+        taskSelectionPreferences.edit().putString("selected_task_id", id).apply()
+    }
+
+    fun moveTask(id: String, offset: Int) = viewModelScope.launch { taskRepository.move(id, offset) }
+
+    fun completeTask(id: String) = viewModelScope.launch {
+        val wasSelected = selectedTask.value?.id == id
+        taskRepository.complete(id)
+        if (wasSelected) selectNextTask()
+    }
+
+    fun skipTask(id: String) = viewModelScope.launch {
+        val wasSelected = selectedTask.value?.id == id
+        taskRepository.skip(id)
+        if (wasSelected) selectNextTask()
+    }
+
+    fun deleteTask(id: String) = viewModelScope.launch {
+        val wasSelected = selectedTask.value?.id == id
+        taskRepository.delete(id)
+        if (wasSelected) selectNextTask()
+    }
+
+    private suspend fun recordFocusForSelectedTask() {
+        val id = selectedTask.value?.id ?: return
+        if (taskRepository.recordCompletedFocus(id)) selectNextTask()
+    }
+
+    private suspend fun selectNextTask() {
+        val next = taskRepository.pending().firstOrNull()
+        _selectedTaskId.value = next?.id
+        taskSelectionPreferences.edit().apply {
+            if (next == null) remove("selected_task_id") else putString("selected_task_id", next.id)
+        }.apply()
+    }
+
     fun triggerPanic() {
         engine.triggerPanic()
     }
@@ -377,7 +456,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                 sourceDevice = "WEAR",
                 incidentStatus = IncidentStatus.PENDING_DETAIL,
                 resolvedAt = System.currentTimeMillis(),
-                taskName = _currentTaskName.value.ifBlank { null }
+                taskName = selectedTask.value?.title
             )
             if (repository.insertIncidentIfAbsent(incident) != -1L) {
                 _activeIncidentAudit.value = incident
@@ -438,7 +517,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     sourceDevice = "PHONE",
                     incidentStatus = IncidentStatus.CLOSED,
                     resolvedAt = System.currentTimeMillis(),
-                    taskName = _currentTaskName.value.ifBlank { null }
+                    taskName = selectedTask.value?.title
                 )
             )
         }

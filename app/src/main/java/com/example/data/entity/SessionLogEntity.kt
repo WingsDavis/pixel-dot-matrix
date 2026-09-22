@@ -10,6 +10,7 @@ data class SessionLogEntity(
     val startTimeMillis: Long,
     val durationSeconds: Int,
     val status: String, // "COMPLETED", "INTERRUPTED", "PANIC"
+    val taskId: String? = null,
     val taskName: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
