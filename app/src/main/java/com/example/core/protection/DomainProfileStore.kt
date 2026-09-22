@@ -37,6 +37,7 @@ class DomainProfileStore(context: Context) {
     fun addDomain(value: String): Boolean = DomainRules.normalize(value)?.let { setDomains(activeDomains() + it); true } ?: false
     fun removeDomain(value: String) { DomainRules.normalize(value)?.let { setDomains(activeDomains() - it) } }
     fun temporarilyUnblock(durationMs: Long) = prefs.edit().putLong(KEY_UNBLOCK_UNTIL, System.currentTimeMillis() + durationMs.coerceAtLeast(0)).apply()
+    fun unblockUntil(): Long = prefs.getLong(KEY_UNBLOCK_UNTIL, 0L)
     fun isTemporarilyUnblocked(now: Long = System.currentTimeMillis()) = now < prefs.getLong(KEY_UNBLOCK_UNTIL, 0L)
     fun autoActivateDuringFocus(): Boolean = prefs.getBoolean(KEY_AUTO_FOCUS, false)
     fun setAutoActivateDuringFocus(enabled: Boolean) = prefs.edit().putBoolean(KEY_AUTO_FOCUS, enabled).apply()

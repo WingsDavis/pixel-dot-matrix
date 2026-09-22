@@ -320,7 +320,33 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
      * Sends an immediate Biometric Frustration Interception alert to the Pixel Watch.
      */
     fun triggerFrustrationAlert() {
+        viewModelScope.launch {
+            repository.insertIncidentIfAbsent(
+                PanicLogEntity(
+                    incidentType = "FRUSTRATION",
+                    sourceDevice = "PHONE",
+                    incidentStatus = IncidentStatus.CLOSED,
+                    resolvedAt = System.currentTimeMillis(),
+                    taskName = _currentTaskName.value.ifBlank { null }
+                )
+            )
+        }
         wearableSyncManager.sendFrustrationAlertMessage()
+    }
+
+    fun temporarilyUnblockDomains(durationMs: Long) {
+        domainProfiles.temporarilyUnblock(durationMs)
+        viewModelScope.launch {
+            repository.insertIncidentIfAbsent(
+                PanicLogEntity(
+                    incidentType = "PROTECTION_OVERRIDE",
+                    sourceDevice = "PHONE",
+                    incidentStatus = IncidentStatus.CLOSED,
+                    resolvedAt = System.currentTimeMillis(),
+                    forensicNotes = "DNS protection temporarily disabled for ${durationMs / 60_000} minutes"
+                )
+            )
+        }
     }
 
     /**

@@ -68,6 +68,13 @@ fun SetupScreen(
             }
         )
     }
+    var hasNotificationPermission by remember {
+        mutableStateOf(
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
 
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -80,6 +87,9 @@ fun SetupScreen(
     ) { granted ->
         hasActivityRecognitionPermission = granted
     }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> hasNotificationPermission = granted }
 
     // Polling for overlay permission if the user goes to settings and back
     LaunchedEffect(Unit) {
@@ -87,6 +97,9 @@ fun SetupScreen(
             hasOverlayPermission = Settings.canDrawOverlays(context)
             hasActivityRecognitionPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+            } else true
+            hasNotificationPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
             } else true
             kotlinx.coroutines.delay(1500)
         }
@@ -362,9 +375,16 @@ fun SetupScreen(
                 Text("Sessions, incidents, preferences, and watch artwork stay in local app storage unless synchronized to your paired watch.", color = CardWhite.copy(alpha = 0.7f), fontSize = 12.sp)
                 Text("Overlay: ${if (hasOverlayPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
                 Text("Physical activity: ${if (hasActivityRecognitionPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
+                Text("Notifications: ${if (hasNotificationPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
                 Text("DNS protection: ${if (isDnsActive) "active" else "inactive"}", color = CardWhite, fontSize = 12.sp)
                 Text("Wear connection: ${if (connectedWatchCount > 0) "$connectedWatchCount connected" else "disconnected"}", color = CardWhite, fontSize = 12.sp)
                 Text("Stored locally: ${sessions.size} sessions · ${incidents.size} incidents · ${syncItems.size} sync records", color = CardWhite.copy(alpha = 0.7f), fontSize = 11.sp)
+                Text("Task names are stored with session history and are removed with it.", color = CardWhite.copy(alpha = 0.55f), fontSize = 10.sp)
+                if (!hasNotificationPermission && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    OutlinedButton(onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Allow notifications")
+                    }
+                }
                 OutlinedButton(onClick = { deleteTarget = "session history" }, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete session history (${sessions.size})")
                 }

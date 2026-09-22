@@ -47,11 +47,20 @@ fun DefenseScreen(viewModel: PomodoroViewModel) {
     var activeProfileId by remember { mutableStateOf(domainStore.activeProfileId()) }
     var profileName by remember { mutableStateOf("") }
     var autoFocus by remember { mutableStateOf(domainStore.autoActivateDuringFocus()) }
+    var unblockUntil by remember { mutableStateOf(domainStore.unblockUntil()) }
+    var unblockRemainingMs by remember { mutableStateOf((unblockUntil - System.currentTimeMillis()).coerceAtLeast(0L)) }
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             viewModel.setDnsSinkholeEnabled(context, true)
+        }
+    }
+
+    LaunchedEffect(unblockUntil) {
+        while (unblockRemainingMs > 0L) {
+            unblockRemainingMs = (unblockUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+            kotlinx.coroutines.delay(1_000L)
         }
     }
 
@@ -183,7 +192,14 @@ fun DefenseScreen(viewModel: PomodoroViewModel) {
                             }
                         }
                     }
-                    OutlinedButton(onClick = { domainStore.temporarilyUnblock(10 * 60 * 1000L) }, modifier = Modifier.fillMaxWidth()) {
+                    if (unblockRemainingMs > 0L) {
+                        Text("Protection resumes in ${unblockRemainingMs / 60_000}:${"%02d".format((unblockRemainingMs / 1_000) % 60)}", color = Color(0xFFFF3B30), fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = {
+                        unblockUntil = System.currentTimeMillis() + 10 * 60 * 1000L
+                        unblockRemainingMs = 10 * 60 * 1000L
+                        viewModel.temporarilyUnblockDomains(10 * 60 * 1000L)
+                    }, modifier = Modifier.fillMaxWidth()) {
                         Text("Unblock for 10 minutes")
                     }
                 }
