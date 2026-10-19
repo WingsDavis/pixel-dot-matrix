@@ -11,7 +11,8 @@ Wear OS app, and a Watch Face Format (WFF) watch face.
 - Circular Wear UI with crown navigation and session-specific colors
 - Configurable dot-matrix watch face colors, text, logo, and complications
 - Offline command queues for disconnected phone/watch operation
-- Local session insights, incident capture, and optional DNS protection
+- Filtered focus insights with daily/weekly totals and incident categories
+- Local incident capture and optional DNS protection
 - Optional daily focus targets in minutes or completed sessions
 - Local-first storage with granular data deletion controls
 
@@ -74,6 +75,7 @@ flowchart LR
 ```
 
 See [Architecture](docs/ARCHITECTURE.md),
+[Insights Metrics](docs/INSIGHTS.md),
 [Implementation Guide](IMPLEMENTATION.md), and
 [Feature Roadmap](FEATURE_ROADMAP.md) for detailed design and progress.
 

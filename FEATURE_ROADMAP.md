@@ -195,10 +195,25 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Redesign with compact retro metrics and dense history rows.
 
 **Acceptance criteria**
-- [ ] Every metric has one documented formula.
+- [x] Every metric has one documented formula in `docs/INSIGHTS.md`.
 - [ ] Empty, partial, and large datasets render correctly.
-- [ ] Metric tests use fixed timestamps and expected results.
+- [x] Metric tests use fixed timestamps and expected results.
 - [ ] Screen remains responsive with at least 10,000 local records.
+
+**Implementation notes**
+- Date presets/custom dates, recorded-task filters, and incident-category filters
+  are implemented without a destructive history migration.
+- Focus totals count saved interrupted work and clip at calendar boundaries;
+  completion explicitly measures ended focus intervals. Recovery is panic-only.
+- Calculations run off the main thread. Daily/weekly summaries and every matching
+  history record are available, with lazy searchable filters and history rows.
+- Fixed-time logic, isolated picker search/selection, and 10,000-record
+  aggregation/lazy-navigation tests pass. Render checks cover 360dp at 1.3x/2x
+  text and landscape. The device dialog integration test compiles in CI.
+- Native dialog-window interaction, TalkBack, and physical-phone responsiveness
+  remain unverified: no phone or emulator was connected. The host test renderer
+  stalls on native dialog-window idling; picker content is tested separately.
+  Keep this item in progress until the connected-device check passes.
 
 ### 9. Backup and Export `[ ]`
 

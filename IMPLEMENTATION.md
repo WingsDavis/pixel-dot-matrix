@@ -258,6 +258,23 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
 - Automated logic, storage, phone interaction/render, and Wear receive tests pass.
   Physical device and watch-face refresh verification is pending connection.
 
+### Useful Insights (Roadmap Item 8)
+
+- `InsightsCalculator.kt` owns date/task filters, focus-overlap accounting,
+  completion and uninterrupted-interval metrics, panic-only recovery, category
+  counts, and daily/weekly buckets. Formulas and legacy-record behavior are
+  documented in `docs/INSIGHTS.md`.
+- `PomodoroViewModel` exposes a cached Insights state calculated off the main
+  thread from Room and filter flows, with a minute refresh while subscribed.
+- `InsightsScreen.kt` uses compact dot-matrix metrics, native date selection,
+  searchable task/category filters, and stable-key lazy history without the old
+  20-record limit. Static retro tiles no longer have no-op click actions.
+- No schema or timer-state changes are required. Host tests cover fixed
+  timestamps, partial data, DST, picker search/selection, and 10,000 records.
+  `InsightsInteractionTest` compiles in CI but requires a connected Android
+  device for native dialog-window interactions. Physical scrolling, TalkBack,
+  and date-picker verification remain pending.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files
@@ -274,7 +291,7 @@ When working on this project, verify and build on top of these files:
 6. **`app/src/main/java/com/example/ui/screens/DefenseScreen.kt`**
    - Local distraction logs displaying historic forensic records, predictive vulnerability, DNS Sinkhole, and frustration alert controls.
 7. **`app/src/main/java/com/example/ui/screens/InsightsScreen.kt`**
-   - Completed focus sessions, task history, and resilience summary.
+   - Filtered focus metrics, daily/weekly totals, incident categories, and lazy focus history.
 
 ### Watch (`:wear`) Target Files
 1. **`wear/src/main/java/com/example/wear/MainActivity.kt`**

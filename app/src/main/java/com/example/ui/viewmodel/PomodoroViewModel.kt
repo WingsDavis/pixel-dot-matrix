@@ -31,6 +31,9 @@ import com.example.data.entity.SessionLogEntity
 import com.example.data.entity.FocusTaskEntity
 import com.example.data.repository.PomodoroRepository
 import com.example.data.repository.FocusTaskRepository
+import com.example.domain.FocusInsights
+import com.example.domain.InsightsCalculator
+import com.example.domain.InsightsFilter
 import com.example.core.sync.WearableSyncManager
 import android.content.Intent
 import android.graphics.Bitmap
@@ -49,6 +52,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
@@ -106,6 +111,24 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     val panicLogs: StateFlow<List<PanicLogEntity>> = repository.allPanicLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _insightsFilter = MutableStateFlow(InsightsFilter())
+    val insightsFilter = _insightsFilter.asStateFlow()
+    val insights: StateFlow<FocusInsights?> = combine(
+        repository.allSessions, repository.allPanicLogs, _insightsFilter,
+        flow {
+            while (true) {
+                emit(System.currentTimeMillis())
+                delay(60_000L)
+            }
+        }
+    ) { sessions, incidents, filter, _ ->
+        InsightsCalculator.calculate(sessions, incidents, filter, System.currentTimeMillis())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun updateInsightsFilter(filter: InsightsFilter) {
+        _insightsFilter.value = filter
+    }
 
     val focusTasks: StateFlow<List<FocusTaskEntity>> = taskRepository.pendingTasks
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
