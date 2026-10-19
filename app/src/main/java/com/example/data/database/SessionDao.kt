@@ -15,6 +15,9 @@ interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSession(session: SessionLogEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSessionIfAbsent(session: SessionLogEntity): Long
+
     @Query("DELETE FROM session_logs WHERE id = :id")
     suspend fun deleteSessionById(id: Int)
 

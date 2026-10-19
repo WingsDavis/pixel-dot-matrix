@@ -20,6 +20,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import android.os.SystemClock
 import com.example.data.database.AppDatabase
+import com.example.core.goal.DailyFocusProgress
 
 enum class WatchFaceSyncPhase {
     IDLE,
@@ -77,6 +78,7 @@ class WearableSyncManager(
     private val watchFaceDraftVersion = AtomicLong(0L)
     private val lastSyncedDraftVersion = AtomicLong(0L)
     private val watchFaceDrafts = Channel<WatchFaceDraft>(Channel.CONFLATED)
+    private val dailyFocusGoals = Channel<DailyFocusProgress>(Channel.CONFLATED)
     @Volatile
     private var hasPublishedInProcess = false
 
@@ -88,6 +90,26 @@ class WearableSyncManager(
             localNodeId = runCatching { nodeClient.localNode.await().id }.getOrDefault(SOURCE_PHONE)
         }
         scope.launch(Dispatchers.IO) { syncOutbox.flush() }
+        scope.launch(Dispatchers.IO) {
+            for (progress in dailyFocusGoals) {
+                val request = PutDataMapRequest.create(PATH_DAILY_FOCUS_GOAL).apply {
+                    dataMap.putInt("schema_version", 1)
+                    dataMap.putBoolean("enabled", progress.settings.enabled)
+                    dataMap.putString("type", progress.settings.type.name)
+                    dataMap.putInt("target_minutes", progress.settings.targetMinutes)
+                    dataMap.putInt("target_sessions", progress.settings.targetSessions)
+                    dataMap.putString("time_zone", progress.settings.timeZoneId)
+                    dataMap.putInt("reset_hour", progress.settings.resetHour)
+                    dataMap.putLong("day_start", progress.day.startEpochMs)
+                    dataMap.putLong("day_end", progress.day.endEpochMs)
+                    dataMap.putLong("focused_seconds", progress.focusedSeconds)
+                    dataMap.putInt("completed_sessions", progress.completedSessions)
+                    dataMap.putLong("timestamp", System.currentTimeMillis())
+                }.asPutDataRequest().setUrgent()
+                runCatching { dataClient.putDataItem(request).await() }
+                    .onFailure { Log.e(TAG, "Failed to publish daily focus target", it) }
+            }
+        }
         scope.launch(Dispatchers.IO) {
             for (draft in watchFaceDrafts) {
                 if (draft.version <= lastSyncedDraftVersion.get()) continue
@@ -133,7 +155,6 @@ class WearableSyncManager(
         val isPanic = snapshot.state == PomodoroState.PANIC_MODE
         scope.launch(Dispatchers.IO) {
             try {
-                val goalPrefs = context.getSharedPreferences("focus_goal_prefs", Context.MODE_PRIVATE)
                 val request = PutDataMapRequest.create(PATH_POMODORO_STATE).apply {
                     dataMap.putString(KEY_STATE, snapshot.state.name)
                     dataMap.putString(KEY_CURRENT_PHASE, snapshot.state.name)
@@ -154,8 +175,6 @@ class WearableSyncManager(
                     dataMap.putInt(KEY_COMPLETED_FOCUS_SESSIONS, engine.completedFocusSessions)
                     dataMap.putBoolean(KEY_AUTO_START_BREAKS, engine.autoStartBreaksEnabled)
                     dataMap.putBoolean(KEY_AUTO_START_FOCUS, engine.autoStartFocusEnabled)
-                    dataMap.putInt("daily_focus_minutes", goalPrefs.getInt("daily_focus_minutes", 0))
-                    dataMap.putInt("daily_target_minutes", goalPrefs.getInt("daily_target_minutes", 120))
                     // Ensure the update is always detected even if primitive values are same
                     dataMap.putLong(KEY_TIMESTAMP, snapshot.updatedAtEpochMs)
                 }.asPutDataRequest()
@@ -226,6 +245,10 @@ class WearableSyncManager(
             runCatching { dataClient.putDataItem(request).await() }
                 .onFailure { error -> Log.e(TAG, "Failed to sync task summaries", error) }
         }
+    }
+
+    fun pushDailyFocusGoal(progress: DailyFocusProgress) {
+        dailyFocusGoals.trySend(progress)
     }
 
     /**
@@ -597,7 +620,8 @@ class WearableSyncManager(
         isRunning = engine.isRunning.value,
         updatedAtEpochMs = System.currentTimeMillis(),
         anchorElapsedRealtimeMs = SystemClock.elapsedRealtime(),
-        completedFocusSessions = engine.completedFocusSessions
+        completedFocusSessions = engine.completedFocusSessions,
+        activeFocusInterval = engine.activeFocusInterval.value
     )
 
     @Synchronized
@@ -627,6 +651,7 @@ class WearableSyncManager(
         const val PATH_TIMER_COMMAND_ACK = "/pomodoro/control_ack"
         const val PATH_INCIDENT_STATUS = "/incident/status"
         const val PATH_TASK_SUMMARIES = "/pomodoro/tasks"
+        const val PATH_DAILY_FOCUS_GOAL = "/pomodoro/daily_target/v1"
 
         const val WATCHFACE_CONFIG_SCHEMA_VERSION = 2
 

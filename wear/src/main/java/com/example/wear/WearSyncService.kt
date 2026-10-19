@@ -38,8 +38,6 @@ class WearSyncService : WearableListenerService() {
                     val timerRevision = dataMap.getLong("timer_revision", -1L)
                     val sourceDevice = dataMap.getString("source_device") ?: "phone"
                     val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
-                    val dailyFocusMinutes = dataMap.getInt("daily_focus_minutes", 0)
-                    val dailyTargetMinutes = dataMap.getInt("daily_target_minutes", 120)
 
                     val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
                     prefs.edit()
@@ -58,8 +56,6 @@ class WearSyncService : WearableListenerService() {
                         .putInt("completed_focus_sessions", dataMap.getInt("completed_focus_sessions", prefs.getInt("completed_focus_sessions", 0)))
                         .putBoolean("auto_start_breaks", dataMap.getBoolean("auto_start_breaks", prefs.getBoolean("auto_start_breaks", false)))
                         .putBoolean("auto_start_focus", dataMap.getBoolean("auto_start_focus", prefs.getBoolean("auto_start_focus", false)))
-                        .putInt("daily_focus_minutes", dailyFocusMinutes)
-                        .putInt("daily_target_minutes", dailyTargetMinutes)
                         .apply()
 
                     // Request complication update for both progress and custom text
@@ -72,6 +68,18 @@ class WearSyncService : WearableListenerService() {
                     androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
                         .create(applicationContext, customComponentName)
                         .requestUpdateAll()
+                } else if (item.uri.path == WearDailyFocusGoal.PATH) {
+                    if (WearDailyFocusGoal.save(this, DataMapItem.fromDataItem(item).dataMap)) {
+                        listOf(
+                            DailyTargetComplicationService::class.java,
+                            CustomTextComplicationService::class.java,
+                            BottomRightComplicationService::class.java
+                        ).forEach { provider ->
+                            androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+                                .create(this, android.content.ComponentName(this, provider))
+                                .requestUpdateAll()
+                        }
+                    }
                 } else if (item.uri.path == "/pomodoro/tasks") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE).edit()

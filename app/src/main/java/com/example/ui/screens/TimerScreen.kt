@@ -47,6 +47,7 @@ import com.example.ui.theme.CardBlack
 import com.example.ui.theme.CardWhite
 import com.example.ui.theme.TealAccent
 import com.example.data.entity.FocusTaskEntity
+import com.example.ui.components.DailyFocusGoalCard
 
 @Composable
 fun TimerScreen(
@@ -58,6 +59,8 @@ fun TimerScreen(
     val isRunning by viewModel.isRunning.collectAsState()
     val focusTasks by viewModel.focusTasks.collectAsState()
     val selectedTask by viewModel.selectedTask.collectAsState()
+    val dailyFocusProgress by viewModel.dailyFocusProgress.collectAsState()
+    val focusGoalSaveError by viewModel.focusGoalSaveError.collectAsState()
 
     val totalDuration = when (currentState) {
         com.example.core.timer.PomodoroState.FOCUS -> viewModel.engine.focusDuration
@@ -98,6 +101,15 @@ fun TimerScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Spacer(modifier = Modifier.height(12.dp))
+
+        DailyFocusGoalCard(
+            progress = dailyFocusProgress,
+            onEnabledChange = viewModel::setDailyTargetEnabled,
+            onTypeChange = viewModel::setDailyTargetType,
+            onTargetChange = viewModel::setDailyTarget,
+            onResetHourChange = viewModel::setDailyResetHour,
+            saveError = focusGoalSaveError
+        )
 
         CompactTaskQueue(
             tasks = focusTasks,

@@ -417,7 +417,7 @@ fun WearScreen(
             )
             Text("Left slot", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             StudioChipRow(
-                values = listOf("custom_text", "phase", "heart_rate", "next_break", "streak", "hidden"),
+                values = listOf("custom_text", "phase", "heart_rate", "next_break", "streak", "daily_target", "hidden"),
                 selectedValue = leftSlotMode,
                 onSelected = { leftSlotMode = it },
                 labels = mapOf(
@@ -426,6 +426,7 @@ fun WearScreen(
                     "heart_rate" to "Heart",
                     "next_break" to "Next Break",
                     "streak" to "Streak",
+                    "daily_target" to "Target",
                     "hidden" to "Hidden"
                 )
             )

@@ -218,6 +218,46 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
 
 ## 3. Development Reference
 
+### Daily Focus Target (Roadmap Item 7)
+
+- `DailyFocusGoalStore.kt` persists the enable switch, minutes/session mode,
+  separate targets, reset hour, and phone time-zone ID in Preferences DataStore.
+  The feature starts disabled. Target values are bounded to 1-1440 minutes or
+  1-100 completed sessions; changing them never updates session history.
+- The shared `DailyFocusGoal.kt` model is compiled into phone and Wear using
+  their Kotlin source sets. Calendar dates define each half-open daily period
+  `[reset, next reset)` so daylight-saving days may be 23 or 25 hours.
+- `DailyFocusCalculator.kt` sums the seconds of saved focus intervals that overlap
+  the daily period, plus the current running focus interval. Minutes are the
+  combined total divided by 60, rounded down. Completed sessions count only
+  records with status `COMPLETED` whose completion time is inside the period.
+  Completion belongs to the ending day; elapsed minutes can span two days.
+- `PomodoroEngine.kt` records elapsed focus before pausing, skipping, resetting,
+  synchronizing, or automatically changing phase. Pauses and skips are recorded
+  as interrupted focus rather than successful completions. Break time is excluded.
+  Existing historical records are read as stored; they are not rewritten.
+- Running intervals retain a stable ID in the timer snapshot. On process
+  recreation, elapsed time and any completed phases are reconciled into focus
+  records before the refreshed timer snapshot is saved. A durable pending record
+  covers a crash between closing an interval and inserting it into Room.
+- Database migration 7 -> 8 adds a nullable unique `recordId`; old rows remain
+  intact, and replaying a recovered record cannot insert a duplicate. This is an
+  additive forward migration; use a database backup for an APK downgrade.
+- The timer home screen has a compact expandable target control with a switch,
+  mode selector, validated number input, increment/decrement buttons, reset-hour
+  menu, progress bar, and a visible save-error state. Time/date/zone broadcasts,
+  app resume, and a bounded clock tick recalculate the current daily period.
+- `/pomodoro/daily_target/v1` publishes an urgent persistent phone-authored
+  snapshot independently of timer-state updates. It includes settings, exact
+  period bounds, focused seconds, and completed sessions. Sub-minute changes
+  are coalesced for sync; both devices display the same whole-minute count.
+- `WearDailyFocusGoal.kt` validates and persists received snapshots. The Wear app
+  adds a Daily Focus page. The dedicated Daily Target provider and owned left and
+  bottom-right slot modes use the same snapshot. Disabled or expired targets
+  return no complication data, and complication validity ends at daily reset.
+- Automated logic, storage, phone interaction/render, and Wear receive tests pass.
+  Physical device and watch-face refresh verification is pending connection.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

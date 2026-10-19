@@ -1,6 +1,6 @@
 # Pixel Dot Matrix Feature Roadmap
 
-Last updated: 2026-09-22
+Last updated: 2026-10-19
 
 This roadmap tracks the 20 planned product improvements across the mobile app,
 Wear app, Watch Face Format bundle, synchronization layer, and local data model.
@@ -21,11 +21,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
 | 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
-| 2. Phone productivity | 6-10 | 1 | 1 | 0 | 3 |
+| 2. Phone productivity | 6-10 | 1 | 2 | 0 | 2 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **6** | **10** | **0** | **4** |
+| **Total** | **20** | **6** | **11** | **0** | **3** |
 
 ## Master Tracker
 
@@ -37,7 +37,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 4 | Watch-face configuration persistence | P0 | `[x]` | 1, 3 |
 | 5 | Session automation | P1 | `[x]` | 1, 2 |
 | 6 | Compact task queue | P1 | `[x]` | 1 |
-| 7 | Daily focus target | P1 | `[ ]` | 1, 2 |
+| 7 | Daily focus target | P1 | `[~]` | 1, 2 |
 | 8 | Useful insights | P1 | `[~]` | 7 |
 | 9 | Backup and export | P2 | `[ ]` | 1, 8 |
 | 10 | Android Quick Settings tile | P1 | `[ ]` | 2 |
@@ -157,7 +157,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - [x] Deleted tasks do not invalidate historical session records.
 - [x] Long titles truncate safely on the watch.
 
-### 7. Daily Focus Target `[ ]`
+### 7. Daily Focus Target `[~]`
 
 **Scope**
 - Support target type: focused minutes or completed sessions.
@@ -165,10 +165,22 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Add a compact home metric and progress complication data.
 
 **Acceptance criteria**
-- [ ] Daily progress is correct across midnight and timezone changes.
-- [ ] Editing a target does not rewrite historical sessions.
+- [x] Daily progress is correct across midnight and timezone changes.
+- [x] Editing a target does not rewrite historical sessions.
 - [ ] Phone and watch show the same target progress.
-- [ ] Users can disable the target entirely.
+- [x] Users can disable the target entirely.
+
+**Verification**
+- DataStore persistence, active-time recording, calendar/DST boundaries, both
+  target modes, disabled/expired Wear snapshots, and phone control interaction
+  are covered by automated tests.
+- Process recreation retains active focus, replays pending pauses/completions
+  once, and preserves old history through the additive Room 7 -> 8 migration.
+- The phone UI has a rendered 360dp large-text check. All three APK modules build.
+- Physical phone/watch synchronization and watch-face complication refresh still
+  need a connected-device check. Keep this item in progress until that passes.
+- Wear displays the latest phone-authored goal snapshot while disconnected and
+  expires that snapshot at its daily reset boundary.
 
 ### 8. Useful Insights `[~]`
 

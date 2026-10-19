@@ -12,6 +12,7 @@ Wear OS app, and a Watch Face Format (WFF) watch face.
 - Configurable dot-matrix watch face colors, text, logo, and complications
 - Offline command queues for disconnected phone/watch operation
 - Local session insights, incident capture, and optional DNS protection
+- Optional daily focus targets in minutes or completed sessions
 - Local-first storage with granular data deletion controls
 
 ## Modules
@@ -25,6 +26,9 @@ Wear OS app, and a Watch Face Format (WFF) watch face.
 The phone and Wear modules intentionally retain their existing application ID
 so installed development builds remain compatible. Product branding is
 independent from the application ID.
+
+The phone and Wear apps share the daily-target model in `shared/src/main/kotlin`.
+It is compiled into both apps without a separate runtime module.
 
 ## Build
 

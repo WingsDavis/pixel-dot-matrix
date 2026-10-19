@@ -5,6 +5,9 @@ import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
+import androidx.wear.watchface.complications.data.NoDataComplicationData
+import androidx.wear.watchface.complications.data.TimeRange
+import java.time.Instant
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
 
@@ -18,13 +21,12 @@ class DailyTargetComplicationService : SuspendingComplicationDataSourceService()
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
         if (request.complicationType != ComplicationType.SHORT_TEXT) return null
-        val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
-        val focused = prefs.getInt("daily_focus_minutes", 0).coerceAtLeast(0)
-        val target = prefs.getInt("daily_target_minutes", 120).coerceAtLeast(1)
-        val value = "${focused.coerceAtMost(target)}/${target}m"
+        val progress = WearDailyFocusGoal.read(this) ?: return NoDataComplicationData()
         return ShortTextComplicationData.Builder(
-            PlainComplicationText.Builder(value).build(),
+            PlainComplicationText.Builder(progress.shortText).build(),
             PlainComplicationText.Builder("Daily focus target").build()
-        ).setTapAction(ComplicationActions.openTimer(this)).build()
+        ).setTapAction(ComplicationActions.openTimer(this))
+            .setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(progress.day.startEpochMs), Instant.ofEpochMilli(progress.day.endEpochMs)))
+            .build()
     }
 }

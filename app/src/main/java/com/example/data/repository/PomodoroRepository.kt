@@ -17,6 +17,8 @@ class PomodoroRepository(
         return sessionDao.insertSession(session)
     }
 
+    suspend fun insertSessionIfAbsent(session: SessionLogEntity): Long = sessionDao.insertSessionIfAbsent(session)
+
     suspend fun deleteSessionById(id: Int) {
         sessionDao.deleteSessionById(id)
     }

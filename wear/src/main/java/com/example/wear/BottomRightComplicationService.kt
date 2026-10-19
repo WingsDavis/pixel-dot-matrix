@@ -11,6 +11,8 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.wear.watchface.complications.data.TimeRange
+import java.time.Instant
 
 class BottomRightComplicationService : SuspendingComplicationDataSourceService() {
 
@@ -31,6 +33,7 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
         val state = syncPrefs.getString("state", "FOCUS") ?: "FOCUS"
         val storedSeconds = syncPrefs.getInt("seconds_remaining", 1500)
         val isRunning = syncPrefs.getBoolean("is_running", false)
+        val dailyGoal = if (mode == "daily_target") WearDailyFocusGoal.read(this) else null
         val secondsRemaining = if (isRunning) {
             val elapsed = ((System.currentTimeMillis() - syncPrefs.getLong("timer_updated_at", System.currentTimeMillis()))
                 .coerceAtLeast(0L) / 1_000L).toInt()
@@ -43,7 +46,7 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
             "phase" -> state.toDisplayText()
             "timer" -> if (isRunning || state == "PANIC_MODE") secondsRemaining.toClockText() else "IDLE"
             "battery" -> "WATCH"
-            "daily_target" -> dailyTargetText(syncPrefs)
+            "daily_target" -> dailyGoal?.shortText
             else -> SimpleDateFormat("EEE dd", Locale.getDefault()).format(Date()).uppercase(Locale.getDefault())
         }
 
@@ -52,6 +55,11 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
         val text = PlainComplicationText.Builder(value).build()
         return ShortTextComplicationData.Builder(text, text)
             .setTapAction(ComplicationActions.openTimer(this))
+            .apply {
+                dailyGoal?.let {
+                    setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(it.day.startEpochMs), Instant.ofEpochMilli(it.day.endEpochMs)))
+                }
+            }
             .build()
     }
 
@@ -71,9 +79,4 @@ class BottomRightComplicationService : SuspendingComplicationDataSourceService()
         return "%02d:%02d".format(minutes, seconds)
     }
 
-    private fun dailyTargetText(prefs: android.content.SharedPreferences): String {
-        val focused = prefs.getInt("daily_focus_minutes", 0).coerceAtLeast(0)
-        val target = prefs.getInt("daily_target_minutes", 120).coerceAtLeast(1)
-        return "${focused.coerceAtMost(target)}/${target}m"
-    }
 }

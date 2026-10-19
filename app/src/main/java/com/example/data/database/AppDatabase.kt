@@ -12,7 +12,7 @@ import com.example.data.entity.FocusTaskEntity
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class, FocusTaskEntity::class], version = 7, exportSchema = false)
+@Database(entities = [SessionLogEntity::class, PanicLogEntity::class, SyncOutboxEntity::class, FocusTaskEntity::class], version = 8, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun panicDao(): PanicDao
@@ -30,7 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "panic_pomodoro_db"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
@@ -94,6 +94,14 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         const val ADD_SESSION_TASK_ID = "ALTER TABLE session_logs ADD COLUMN taskId TEXT"
+        const val ADD_SESSION_RECORD_ID = "ALTER TABLE session_logs ADD COLUMN recordId TEXT"
+        const val CREATE_SESSION_RECORD_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS index_session_logs_recordId ON session_logs(recordId)"
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(ADD_SESSION_RECORD_ID)
+                database.execSQL(CREATE_SESSION_RECORD_INDEX)
+            }
+        }
         val CREATE_FOCUS_TASKS_TABLE = """CREATE TABLE IF NOT EXISTS focus_tasks (
             id TEXT NOT NULL PRIMARY KEY,
             title TEXT NOT NULL,

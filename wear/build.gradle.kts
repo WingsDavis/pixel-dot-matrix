@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -33,6 +34,8 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets.getByName("main").kotlin.directories.add("${rootDir}/shared/src/main/kotlin")
+    testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
 dependencies {
@@ -67,4 +70,11 @@ dependencies {
     // Tooling/Preview
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation(libs.junit)
+    testImplementation(libs.androidx.core)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

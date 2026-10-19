@@ -11,6 +11,17 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
+
+data class FocusInterval(
+    val startTimeMillis: Long,
+    val durationSeconds: Int = 0,
+    val completed: Boolean = false,
+    val id: String = java.util.UUID.randomUUID().toString()
+) {
+    val endTimeMillis: Long get() = startTimeMillis + durationSeconds.toLong() * 1000L
+}
 
 enum class TimerTransitionCause { COMPLETED, MANUAL }
 
@@ -24,7 +35,8 @@ data class TimerTransition(
 class PomodoroEngine(
     private val scope: CoroutineScope,
     initialSettings: TimerSettings = TimerSettings(),
-    private val timerDispatcher: CoroutineDispatcher = Dispatchers.Main
+    private val timerDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val onFocusIntervalRecorded: (FocusInterval) -> Unit = {}
 ) {
     var focusDuration = initialSettings.focusDurationSeconds
         private set
@@ -50,6 +62,10 @@ class PomodoroEngine(
 
     private val _transitionEvents = MutableSharedFlow<TimerTransition>(extraBufferCapacity = 4)
     val transitionEvents: SharedFlow<TimerTransition> = _transitionEvents
+    private val recordedFocusIntervals = Channel<FocusInterval>(Channel.UNLIMITED)
+    val focusIntervals = recordedFocusIntervals.receiveAsFlow()
+    private val _activeFocusInterval = MutableStateFlow<FocusInterval?>(null)
+    val activeFocusInterval = _activeFocusInterval.asStateFlow()
 
     private var timerJob: Job? = null
 
@@ -62,11 +78,13 @@ class PomodoroEngine(
     fun start() {
         if (_isRunning.value) return
         _isRunning.value = true
+        beginFocusInterval()
         startTimerJob()
     }
 
     fun pause() {
         if (!_isRunning.value) return
+        finishFocusInterval(completed = false)
         _isRunning.value = false
         timerJob?.cancel()
     }
@@ -125,8 +143,12 @@ class PomodoroEngine(
             while (_isRunning.value) {
                 delay(1000)
                 if (_secondsRemaining.value > 0) {
+                    _activeFocusInterval.value = _activeFocusInterval.value?.let {
+                        it.copy(durationSeconds = it.durationSeconds + 1)
+                    }
                     _secondsRemaining.value -= 1
-                } else {
+                }
+                if (_secondsRemaining.value == 0) {
                     onTimerFinished()
                     break
                 }
@@ -135,6 +157,7 @@ class PomodoroEngine(
     }
 
     private fun onTimerFinished() {
+        finishFocusInterval(completed = true)
         _isRunning.value = false
         timerJob?.cancel()
 
@@ -199,11 +222,13 @@ class PomodoroEngine(
 
     // Explicit setter for synchronizing external states (e.g., from Wearable device)
     fun syncState(state: PomodoroState, remainingSeconds: Int, running: Boolean) {
+        finishFocusInterval(completed = false)
         _currentState.value = state
         _secondsRemaining.value = remainingSeconds
         _isRunning.value = running
 
         if (running) {
+            beginFocusInterval()
             startTimerJob()
         } else {
             timerJob?.cancel()
@@ -215,8 +240,27 @@ class PomodoroEngine(
     }
 
     internal fun completeCurrentInterval() {
-        pause()
         onTimerFinished()
+    }
+
+    private fun beginFocusInterval() {
+        if (_currentState.value == PomodoroState.FOCUS) {
+            _activeFocusInterval.value = FocusInterval(System.currentTimeMillis())
+        }
+    }
+
+    private fun finishFocusInterval(completed: Boolean) {
+        val interval = _activeFocusInterval.value ?: return
+        if (interval.durationSeconds > 0 || completed) {
+            val recorded = interval.copy(completed = completed)
+            onFocusIntervalRecorded(recorded)
+            recordedFocusIntervals.trySend(recorded)
+        }
+        _activeFocusInterval.value = null
+    }
+
+    fun restoreActiveFocusInterval(interval: FocusInterval?) {
+        _activeFocusInterval.value = interval.takeIf { _currentState.value == PomodoroState.FOCUS && _isRunning.value }
     }
 
     // Adapt timer duration dynamically based on biometric feedback

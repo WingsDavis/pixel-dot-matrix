@@ -1,6 +1,5 @@
 package com.example.wear
 
-import android.content.SharedPreferences
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.PlainComplicationText
@@ -9,6 +8,8 @@ import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
 import android.content.Context
+import androidx.wear.watchface.complications.data.TimeRange
+import java.time.Instant
 
 class CustomTextComplicationService : SuspendingComplicationDataSourceService() {
 
@@ -32,6 +33,7 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
         val hr = prefs.getInt("current_hr", 74)
         val isRunning = prefs.getBoolean("is_running", false)
         val isActive = isRunning || state == "PANIC_MODE"
+        val dailyGoal = if (leftSlotMode == "daily_target") WearDailyFocusGoal.read(this) else null
 
         val displayStr: String? = when {
             leftSlotMode == "hidden" -> null
@@ -41,7 +43,7 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
             leftSlotMode == "heart_rate" -> "$hr BPM"
             leftSlotMode == "next_break" -> state.toNextBreakText()
             leftSlotMode == "streak" -> "STREAK 0"
-            leftSlotMode == "daily_target" -> dailyTargetText(prefs)
+            leftSlotMode == "daily_target" -> dailyGoal?.shortText
             else -> customText.ifBlank { null }
         }
 
@@ -52,8 +54,12 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
         val text = PlainComplicationText.Builder(displayStr).build()
 
         return when (request.complicationType) {
-            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(text, text).build()
-            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(text, text).build()
+            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(text, text).apply {
+                dailyGoal?.let { setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(it.day.startEpochMs), Instant.ofEpochMilli(it.day.endEpochMs))) }
+            }.build()
+            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(text, text).apply {
+                dailyGoal?.let { setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(it.day.startEpochMs), Instant.ofEpochMilli(it.day.endEpochMs))) }
+            }.build()
             else -> null
         }
     }
@@ -77,9 +83,4 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
         }
     }
 
-    private fun dailyTargetText(prefs: SharedPreferences): String {
-        val focused = prefs.getInt("daily_focus_minutes", 0).coerceAtLeast(0)
-        val target = prefs.getInt("daily_target_minutes", 120).coerceAtLeast(1)
-        return "${focused.coerceAtMost(target)}/${target}m"
-    }
 }

@@ -47,6 +47,7 @@ android {
     buildConfig = true
   }
   sourceSets.getByName("main").assets.directories.add("${rootDir}/wear/src/main/res/font")
+  sourceSets.getByName("main").kotlin.directories.add("${rootDir}/shared/src/main/kotlin")
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 

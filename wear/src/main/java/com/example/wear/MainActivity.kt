@@ -60,6 +60,7 @@ import java.nio.charset.StandardCharsets
 import com.example.wear.ui.theme.*
 import com.example.wear.ui.components.*
 import java.util.UUID
+import com.example.core.goal.DailyFocusProgress
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener, SensorEventListener {
 
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private val _isRunning = mutableStateOf(false)
     private val _currentTaskSummary = mutableStateOf("")
     private val _nextTaskSummary = mutableStateOf("")
+    private val _dailyFocusProgress = mutableStateOf<DailyFocusProgress?>(null)
     private var timerRevision = -1L
     private var timerSessionId = UUID.randomUUID().toString()
     private var timerUpdatedAtEpochMs = 0L
@@ -211,7 +213,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     animationSpec = tween(durationMillis = 800)
                 )
 
-                val pagerState = rememberPagerState(pageCount = { 5 })
+                val pagerState = rememberPagerState(pageCount = { 6 })
                 val focusRequester = remember { FocusRequester() }
                 val coroutineScope = rememberCoroutineScope()
                 var rotaryAccumulator by remember { mutableFloatStateOf(0f) }
@@ -371,6 +373,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                                 onDistraction = { sendMessageToPhone("/incident/mark", "DISTRACTION") }
                             )
                         }
+                        5 -> DailyFocusTargetScreen(_dailyFocusProgress.value)
                         }
                     }
                     Row(
@@ -400,6 +403,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         messageClient.addListener(this)
         activityScope.launch(Dispatchers.IO) {
             while (isActive) {
+                withContext(Dispatchers.Main) { _dailyFocusProgress.value = WearDailyFocusGoal.read(this@MainActivity) }
                 commandOutbox.flush()
                 if (hasWearAuthority && runCatching { Tasks.await(nodeClient.connectedNodes).isNotEmpty() }.getOrDefault(false)) {
                     publishWearSnapshot()
@@ -599,6 +603,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
                     saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
                     Log.d(TAG, "Watch state updated from phone: state=${_stateName.value}, running=${_isRunning.value}, panic=$isPanic")
+                } else if (item.uri.path == WearDailyFocusGoal.PATH) {
+                    WearDailyFocusGoal.save(this, DataMapItem.fromDataItem(item).dataMap)
+                    _dailyFocusProgress.value = WearDailyFocusGoal.read(this)
                 } else if (item.uri.path == "/pomodoro/tasks") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     _currentTaskSummary.value = dataMap.getString("current_task").orEmpty().take(40)
@@ -642,6 +649,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     }
 
     private fun restoreTimerState() {
+        _dailyFocusProgress.value = WearDailyFocusGoal.read(this)
         val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
         _stateName.value = prefs.getString("state", "FOCUS") ?: "FOCUS"
         _secondsRemaining.value = prefs.getInt("seconds_remaining", 1500)
@@ -838,6 +846,25 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 }
 
 // --- Wear OS Simple Composable Display Cards ---
+
+@Composable
+internal fun DailyFocusTargetScreen(progress: DailyFocusProgress?) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("DAILY FOCUS", fontFamily = DotMatrixFont, style = WearTypography.title2)
+        Spacer(Modifier.height(12.dp))
+        if (progress == null) {
+            Text("Target off or awaiting phone", textAlign = TextAlign.Center, style = WearTypography.body2)
+        } else {
+            Text(progress.shortText, fontFamily = DotMatrixFont, fontSize = 24.sp, color = TealAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            Text(if (progress.complete) "TARGET REACHED" else "${(progress.fraction * 100).toInt()}%", style = WearTypography.caption1)
+        }
+    }
+}
 
 @Composable
 fun FrustrationWarningScreen(

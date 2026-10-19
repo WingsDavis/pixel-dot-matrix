@@ -1,6 +1,7 @@
 package com.example.core.sync
 
 import com.example.core.timer.PomodoroState
+import com.example.core.timer.FocusInterval
 import java.util.UUID
 
 enum class TimerAuthority { PHONE, WEAR }
@@ -16,7 +17,8 @@ data class TimerSnapshot(
     val updatedAtEpochMs: Long,
     val anchorElapsedRealtimeMs: Long,
     val leaseExpiresAtEpochMs: Long = 0L,
-    val completedFocusSessions: Int = 0
+    val completedFocusSessions: Int = 0,
+    val activeFocusInterval: FocusInterval? = null
 )
 
 data class TimerCommand(
