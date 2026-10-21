@@ -275,6 +275,20 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   device for native dialog-window interactions. Physical scrolling, TalkBack,
   and date-picker verification remain pending.
 
+### Backup and Export (Roadmap Item 9)
+
+- `core/backup/BackupCodec.kt` defines strict schema-v1 JSON and analysis CSV.
+  `BackupRepository.kt` merges local records transactionally and journals
+  preference application for resumable restoration. Room migration 8 -> 9 adds
+  only `restore_settings`.
+- App Setup provides system document pickers, import review, retry feedback, and
+  separate history/task/preference/media controls. Exported files are plaintext;
+  media, permission grants, live authority, and pending commands are excluded.
+- Phone and Wear automatic-backup policies now explicitly exclude app storage;
+  export is user initiated. `docs/BACKUP.md` documents the scope and CSV headers.
+- Host tests cover validation, round trips, deduplication, rollback, journal
+  replay, policy, and rendering. Native provider/device checks remain pending.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

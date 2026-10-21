@@ -41,7 +41,16 @@ class DomainProfileStore(context: Context) {
     fun isTemporarilyUnblocked(now: Long = System.currentTimeMillis()) = now < prefs.getLong(KEY_UNBLOCK_UNTIL, 0L)
     fun autoActivateDuringFocus(): Boolean = prefs.getBoolean(KEY_AUTO_FOCUS, false)
     fun setAutoActivateDuringFocus(enabled: Boolean) = prefs.edit().putBoolean(KEY_AUTO_FOCUS, enabled).apply()
-    fun clearAll() = prefs.edit().clear().apply()
+    fun clearAll() { check(prefs.edit().clear().commit()) { "Could not delete protection preferences" } }
+
+    fun restore(profiles: List<DomainProfile>, activeId: String, autoFocus: Boolean) {
+        require(profiles.isNotEmpty() && profiles.map { it.id }.distinct().size == profiles.size)
+        require(profiles.any { it.id == DEFAULT_PROFILE_ID } && profiles.any { it.id == activeId })
+        require(profiles.all { profile -> profile.name.isNotBlank() && profile.domains.all { DomainRules.normalize(it) == it } })
+        check(prefs.edit().putStringSet(KEY_PROFILES, profiles.map(::encode).toSet())
+            .putString(KEY_ACTIVE_PROFILE, activeId).putBoolean(KEY_AUTO_FOCUS, autoFocus)
+            .putLong(KEY_UNBLOCK_UNTIL, 0L).commit()) { "Could not restore protection preferences" }
+    }
 
     private fun readProfiles(): List<DomainProfile> {
         val stored = prefs.getStringSet(KEY_PROFILES, emptySet()).orEmpty().mapNotNull(::decode)

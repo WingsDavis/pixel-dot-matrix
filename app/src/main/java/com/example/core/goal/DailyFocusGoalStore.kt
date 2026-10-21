@@ -21,8 +21,9 @@ class DailyFocusGoalStore(private val dataStore: DataStore<Preferences>) {
 
     val settings = dataStore.data.catch { error ->
         if (error is IOException) emit(emptyPreferences()) else throw error
-    }.map { preferences ->
-        DailyFocusGoalSettings(
+    }.map(::fromPreferences)
+
+    private fun fromPreferences(preferences: Preferences) = DailyFocusGoalSettings(
             enabled = preferences[ENABLED] ?: false,
             type = runCatching { FocusTargetType.valueOf(preferences[TYPE].orEmpty()) }.getOrDefault(FocusTargetType.MINUTES),
             targetMinutes = preferences[MINUTES] ?: 120,
@@ -30,9 +31,9 @@ class DailyFocusGoalStore(private val dataStore: DataStore<Preferences>) {
             timeZoneId = preferences[ZONE] ?: java.util.TimeZone.getDefault().id,
             resetHour = preferences[RESET_HOUR] ?: 0
         ).sanitized()
-    }
 
     suspend fun load(): DailyFocusGoalSettings = settings.first()
+    suspend fun loadForBackup(): DailyFocusGoalSettings = fromPreferences(dataStore.data.first())
 
     suspend fun save(settings: DailyFocusGoalSettings) {
         val safe = settings.sanitized()

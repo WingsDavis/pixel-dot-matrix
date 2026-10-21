@@ -12,6 +12,9 @@ interface SessionDao {
     @Query("SELECT * FROM session_logs ORDER BY timestamp DESC")
     fun getAllSessions(): Flow<List<SessionLogEntity>>
 
+    @Query("SELECT * FROM session_logs ORDER BY timestamp DESC")
+    suspend fun snapshot(): List<SessionLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSession(session: SessionLogEntity): Long
 

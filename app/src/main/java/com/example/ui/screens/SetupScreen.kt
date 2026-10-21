@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,10 +28,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewModelScope
 import com.example.ui.viewmodel.PomodoroViewModel
 import com.example.ui.components.BentoCard
 import com.example.ui.components.BentoPillButton
+import com.example.ui.components.BackupControls
+import kotlinx.coroutines.launch
 import com.example.ui.theme.CardBlack
 import com.example.ui.theme.CardWhite
 import com.example.ui.theme.TealAccent
@@ -49,6 +49,9 @@ fun SetupScreen(
     val connectedWatchCount by viewModel.connectedWatchCount.collectAsState()
     val isDnsActive by viewModel.isDnsSinkholeActive.collectAsState()
     var deleteTarget by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deletionMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     val timerSettings by viewModel.timerSettings.collectAsState()
     val focusMin = timerSettings.focusDurationSeconds / 60
@@ -107,23 +110,21 @@ fun SetupScreen(
 
     deleteTarget?.let { target ->
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
+            onDismissRequest = { if (!deleting) deleteTarget = null },
             title = { Text("Delete local data?") },
             text = { Text("This removes $target from this phone and cannot be undone.") },
             confirmButton = {
-                TextButton(onClick = {
-                    when (target) {
-                        "session history" -> viewModel.clearSessionHistory()
-                        "incident history" -> viewModel.clearIncidentHistory()
-                        "pending sync operations" -> viewModel.clearSyncQueue()
-                        "watch artwork and face settings" -> viewModel.resetWatchFace()
-                        "protection profiles" -> viewModel.clearProtectionSettings()
+                TextButton(enabled = !deleting, onClick = {
+                    deleting = true
+                    scope.launch {
+                        deletionMessage = runCatching { viewModel.deleteLocalData(target) }
+                            .getOrElse { "Could not complete deletion: ${it.message.orEmpty()}" }
+                        deleting = false
+                        deleteTarget = null
                     }
-                    Toast.makeText(context, "Deleted $target", Toast.LENGTH_SHORT).show()
-                    deleteTarget = null
                 }) { Text("Delete", color = Color(0xFFFF5252)) }
             },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(enabled = !deleting, onClick = { deleteTarget = null }) { Text("Cancel") } }
         )
     }
 
@@ -405,6 +406,8 @@ fun SetupScreen(
             }
         }
 
+        BackupControls(viewModel)
+
         // Clear Storage Card
         BentoCard(
             modifier = Modifier.fillMaxWidth(),
@@ -413,7 +416,8 @@ fun SetupScreen(
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Privacy & local data", color = CardWhite, fontWeight = FontWeight.Bold)
-                Text("Sessions, incidents, preferences, and watch artwork stay in local app storage unless synchronized to your paired watch.", color = CardWhite.copy(alpha = 0.7f), fontSize = 12.sp)
+                Text("Sessions, incidents and preferences use local app storage. Paired-watch sync and files you export are separate copies.", color = CardWhite.copy(alpha = 0.7f), fontSize = 12.sp)
+                Text("Deleting app data does not delete previously exported files.", color = CardWhite.copy(alpha = 0.7f), fontSize = 12.sp)
                 Text("Overlay: ${if (hasOverlayPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
                 Text("Physical activity: ${if (hasActivityRecognitionPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
                 Text("Notifications: ${if (hasNotificationPermission) "allowed" else "not allowed"}", color = CardWhite, fontSize = 12.sp)
@@ -432,6 +436,10 @@ fun SetupScreen(
                 OutlinedButton(onClick = { deleteTarget = "incident history" }, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete incident history (${incidents.size})")
                 }
+                OutlinedButton(onClick = { deleteTarget = "tasks" }, modifier = Modifier.fillMaxWidth()) { Text("Delete all tasks") }
+                OutlinedButton(onClick = { deleteTarget = "timer and daily target preferences" }, modifier = Modifier.fillMaxWidth()) { Text("Reset timer & target preferences") }
+                OutlinedButton(onClick = { deleteTarget = "watch face preferences" }, modifier = Modifier.fillMaxWidth()) { Text("Delete face preferences & presets") }
+                OutlinedButton(onClick = { deleteTarget = "custom logo media" }, modifier = Modifier.fillMaxWidth()) { Text("Reset custom logo only") }
                 OutlinedButton(onClick = { deleteTarget = "pending sync operations" }, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete sync queue (${syncItems.size})")
                 }
@@ -441,6 +449,7 @@ fun SetupScreen(
                 OutlinedButton(onClick = { deleteTarget = "protection profiles" }, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete protection profiles")
                 }
+                deletionMessage?.let { Text(it, color = CardWhite, fontSize = 12.sp) }
                 OutlinedButton(onClick = {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/WingsDavis/pixel-dot-matrix")))
                 }, modifier = Modifier.fillMaxWidth()) { Text("View source repository") }

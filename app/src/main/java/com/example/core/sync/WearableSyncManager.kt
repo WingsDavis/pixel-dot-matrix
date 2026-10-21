@@ -555,13 +555,22 @@ class WearableSyncManager(
 
     fun resetWatchFaceLogo() {
         scope.launch(Dispatchers.IO) {
-            val request = PutDataMapRequest.create(PATH_WATCHFACE_LOGO_V1).apply {
-                dataMap.putBoolean(KEY_RESET_LOGO, true)
-                dataMap.putString(KEY_REVISION, UUID.randomUUID().toString())
-                dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
-            }.asPutDataRequest().setUrgent()
-            dataClient.putDataItem(request).await()
+            runCatching { resetWatchFaceLogoAndAwait() }.onFailure { Log.e(TAG, "Could not queue logo reset", it) }
         }
+    }
+
+    suspend fun resetWatchFaceLogoAndAwait() {
+        val request = PutDataMapRequest.create(PATH_WATCHFACE_LOGO_V1).apply {
+            dataMap.putBoolean(KEY_RESET_LOGO, true)
+            dataMap.putString(KEY_REVISION, UUID.randomUUID().toString())
+            dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        dataClient.putDataItem(request).await()
+    }
+
+    fun clearWatchFacePreferences() {
+        watchFaceConfigStore.restore(WatchFaceConfig(), emptyList(), emptyList())
+        refreshRestoredWatchFaceSettings()
     }
 
     fun applyWatchFacePreset(id: String) {
@@ -577,6 +586,13 @@ class WearableSyncManager(
     fun renameWatchFacePreset(id: String, name: String) = watchFaceConfigStore.renamePreset(id, name)
     fun deleteWatchFacePreset(id: String) = watchFaceConfigStore.deletePreset(id)
     fun rememberWatchFaceColor(hex: String) = watchFaceConfigStore.rememberColor(hex)
+
+    fun refreshRestoredWatchFaceSettings() {
+        watchFaceConfigStore.refresh()
+        val config = watchFaceConfigStore.config.value
+        pushWatchFaceConfig(config.hourColor, config.secondColor, config.minuteColor, config.customText,
+            config.leftSlotMode, config.bottomRightSlotMode, config.showLogo, config.ambientStyle, config.preset)
+    }
 
     fun resetWatchFaceConfig() {
         val defaults = watchFaceConfigStore.reset()

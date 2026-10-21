@@ -55,6 +55,13 @@ private class FakeFocusTaskDao : FocusTaskDao {
     override suspend fun update(task: FocusTaskEntity) = update { tasks[task.id] = task }
     override suspend fun delete(id: String) = update { tasks.remove(id) }
     override suspend fun maxPendingOrder(): Int = pending().maxOfOrNull { it.sortOrder } ?: -1
+    override suspend fun snapshot(): List<FocusTaskEntity> = tasks.values.toList()
+    override suspend fun clearAll() = update { tasks.clear() }
+    override suspend fun insertIfAbsent(task: FocusTaskEntity): Long {
+        if (task.id in tasks) return -1
+        upsert(task)
+        return tasks.size.toLong()
+    }
 
     private inline fun update(block: () -> Unit) {
         block()

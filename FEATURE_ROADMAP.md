@@ -1,6 +1,6 @@
 # Pixel Dot Matrix Feature Roadmap
 
-Last updated: 2026-10-19
+Last updated: 2026-10-21
 
 This roadmap tracks the 20 planned product improvements across the mobile app,
 Wear app, Watch Face Format bundle, synchronization layer, and local data model.
@@ -21,11 +21,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
 | 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
-| 2. Phone productivity | 6-10 | 1 | 2 | 0 | 2 |
+| 2. Phone productivity | 6-10 | 1 | 3 | 0 | 1 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **6** | **11** | **0** | **3** |
+| **Total** | **20** | **6** | **12** | **0** | **2** |
 
 ## Master Tracker
 
@@ -39,7 +39,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 6 | Compact task queue | P1 | `[x]` | 1 |
 | 7 | Daily focus target | P1 | `[~]` | 1, 2 |
 | 8 | Useful insights | P1 | `[~]` | 7 |
-| 9 | Backup and export | P2 | `[ ]` | 1, 8 |
+| 9 | Backup and export | P2 | `[~]` | 1, 8 |
 | 10 | Android Quick Settings tile | P1 | `[ ]` | 2 |
 | 11 | Actionable complications | P1 | `[~]` | 2, 3, 7 |
 | 12 | Watch-side quick actions | P1 | `[~]` | 2, 3 |
@@ -215,7 +215,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
   stalls on native dialog-window idling; picker content is tested separately.
   Keep this item in progress until the connected-device check passes.
 
-### 9. Backup and Export `[ ]`
+### 9. Backup and Export `[~]`
 
 **Scope**
 - Export sessions, incidents, tasks, and settings as versioned JSON.
@@ -224,10 +224,22 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Validate imports before changing the database; use a transaction.
 
 **Acceptance criteria**
-- [ ] Exported CSV opens correctly with stable UTF-8 headers.
-- [ ] JSON round-trip restores supported local data.
-- [ ] Invalid or newer schemas fail without partial import.
+- [x] Exported CSV opens correctly with stable UTF-8 headers.
+- [x] JSON round-trip restores supported local data.
+- [x] Invalid or newer schemas fail without partial import.
 - [ ] Users can separately delete history, preferences, and media.
+
+**Implementation and verification**
+- Versioned JSON, UTF-8 CSV, system file pickers, pre-import validation, and a
+  confirmation preview are implemented. See `docs/BACKUP.md` for the contract.
+- Record merge and a durable pending-settings journal commit together. Settings
+  replay after interruption without importing live authority or command queues.
+- Granular deletion reports completion/failure after local writes; remote logo
+  reset is explicitly queued rather than falsely confirmed.
+- Host tests cover round trips, hostile input, CSV escaping/formula protection,
+  duplicate delivery, rollback, settings replay, and backup exclusions.
+- Native file-provider, disk-full/process-kill, and connected-watch application
+  remain device checks. Keep the feature in progress until those pass.
 
 ### 10. Android Quick Settings Tile `[ ]`
 

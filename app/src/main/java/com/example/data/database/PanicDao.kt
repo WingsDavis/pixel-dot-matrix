@@ -13,6 +13,9 @@ interface PanicDao {
     @Query("SELECT * FROM panic_logs ORDER BY timestamp DESC")
     fun getAllPanicLogs(): Flow<List<PanicLogEntity>>
 
+    @Query("SELECT * FROM panic_logs ORDER BY timestamp DESC")
+    suspend fun snapshot(): List<PanicLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPanicLog(panicLog: PanicLogEntity): Long
 

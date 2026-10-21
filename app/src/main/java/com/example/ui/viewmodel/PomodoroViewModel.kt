@@ -13,6 +13,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.core.content.ContextCompat
 import com.example.core.goal.DailyFocusCalculator
 import com.example.core.goal.DailyFocusGoalSettings
+import com.example.core.backup.BackupRepository
+import com.example.core.backup.BackupCodec
+import com.example.core.backup.BackupDocument
 import com.example.core.goal.DailyFocusGoalStore
 import com.example.core.goal.FocusTargetType
 import com.example.core.timer.PomodoroEngine
@@ -60,17 +63,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import com.example.core.protection.DomainProfileStore
 
 class PomodoroViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
 
     private val database = AppDatabase.getDatabase(application)
+    private val backupRepository = BackupRepository(application, database)
+    private val restoredBackupSettings = runBlocking(Dispatchers.IO) { runCatching { backupRepository.finishPendingSettings() } }
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
     private val taskRepository = FocusTaskRepository(database.focusTaskDao())
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
     private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
     private val timerSnapshotStore = TimerSnapshotStore(application)
+    private val panicRuntimePreferences = application.getSharedPreferences("panic_runtime", Context.MODE_PRIVATE)
+    private var livePanicIncidentId: String? = panicRuntimePreferences.getString("active_incident_id", null)
     private val restoredTimerSnapshot = timerSnapshotStore.load()
     private val pendingFocusIntervals = timerSnapshotStore.pendingFocusIntervals()
     private val restoredTimer = restoredTimerSnapshot?.let {
@@ -105,6 +114,12 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val goalClock = MutableStateFlow(System.currentTimeMillis())
     private val _focusGoalSaveError = MutableStateFlow<String?>(null)
     val focusGoalSaveError = _focusGoalSaveError.asStateFlow()
+    private val _backupState = MutableStateFlow(BackupUiState(
+        settingsPending = restoredBackupSettings.isFailure,
+        message = if (restoredBackupSettings.isFailure) "A settings restore is pending. Retry it before importing another backup." else null
+    ))
+    val backupState = _backupState.asStateFlow()
+    private var preparedBackup: BackupDocument? = null
 
     val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -234,6 +249,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
+        if (currentState.value != PomodoroState.PANIC_MODE) livePanicIncidentId = null
         ContextCompat.registerReceiver(
             application,
             goalTimeReceiver,
@@ -353,9 +369,13 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     // Start Phone Haptics
                     startPhoneHaptics(application)
 
-                    // Insert unresolved Panic log
-                    repository.insertPanicLog(
+                    val incidentId = livePanicIncidentId ?: java.util.UUID.randomUUID().toString().also {
+                        check(panicRuntimePreferences.edit().putString("active_incident_id", it).commit())
+                        livePanicIncidentId = it
+                    }
+                    repository.insertIncidentIfAbsent(
                         PanicLogEntity(
+                            incidentId = incidentId,
                             timestamp = now,
                             heartRateSpike = 138, // simulated heart rate spike triggering this
                             stepsTaken = 0,
@@ -367,9 +387,11 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     // Resolved Panic Mode! Unregister step sensor and save log
                     unregisterStepSensor()
                     stopPhoneHaptics(application)
+                    val resolvedIncidentId = livePanicIncidentId
+                    livePanicIncidentId = null
                     viewModelScope.launch {
-                        val activePanic = repository.getActivePanicLog()
-                        if (activePanic != null) {
+                        val activePanic = resolvedIncidentId?.let { database.panicDao().getByIncidentId(it) }
+                        if (activePanic != null && IncidentStatus.canTransition(activePanic.incidentStatus, IncidentStatus.PENDING_DETAIL)) {
                             val updatedPanic = activePanic.copy(
                                 stepsTaken = _stepsTakenInPanic.value,
                                 resolvedAt = now,
@@ -377,6 +399,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                             )
                             repository.updatePanicLog(updatedPanic)
                             _activeIncidentAudit.value = updatedPanic
+                        }
+                        if (panicRuntimePreferences.getString("active_incident_id", null) == resolvedIncidentId) {
+                            panicRuntimePreferences.edit().remove("active_incident_id").commit()
                         }
                     }
                 }
@@ -723,10 +748,121 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         wearableSyncManager.flushPendingSync()
     }
 
-    fun clearSessionHistory() = viewModelScope.launch { repository.clearAllSessions() }
-    fun clearIncidentHistory() = viewModelScope.launch { repository.clearAllPanicLogs() }
-    fun clearSyncQueue() = viewModelScope.launch { database.syncOutboxDao().clearAll() }
-    fun clearProtectionSettings() = domainProfiles.clearAll()
+    fun exportBackup(uri: Uri, kind: BackupExportKind) = backupOperation {
+        val document = backupRepository.snapshot()
+        withContext(Dispatchers.IO) {
+            val bytes = when (kind) {
+                BackupExportKind.JSON -> BackupCodec.encode(document)
+                BackupExportKind.SESSIONS -> BackupCodec.sessionsCsv(document.sessions)
+                BackupExportKind.INCIDENTS -> BackupCodec.incidentsCsv(document.incidents)
+            }
+            val stream = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                ?: error("The selected location could not be opened")
+            stream.use { it.write(bytes); it.flush() }
+        }
+        _backupState.value = _backupState.value.copy(message = "Export saved. Backups are unencrypted.")
+    }
+
+    fun prepareBackupImport(uri: Uri) = backupOperation {
+        val document = withContext(Dispatchers.IO) {
+            val stream = getApplication<Application>().contentResolver.openInputStream(uri)
+                ?: error("The selected backup could not be opened")
+            val bytes = stream.use { input ->
+                ByteArrayOutputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        require(output.size().toLong() + count <= BackupCodec.MAX_BYTES) { "Backup exceeds the supported size limit" }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
+            }
+            BackupCodec.decode(bytes)
+        }
+        preparedBackup = document
+        _backupState.value = _backupState.value.copy(message = null, preview = BackupPreview(
+            document.sessions.size, document.incidents.size, document.tasks.size
+        ))
+    }
+
+    fun cancelBackupImport() {
+        if (_backupState.value.busy) return
+        preparedBackup = null
+        _backupState.value = _backupState.value.copy(preview = null)
+    }
+
+    fun confirmBackupImport() = backupOperation {
+        val document = preparedBackup ?: error("Select the backup again")
+        val result = backupRepository.restore(document)
+        preparedBackup = null
+        _backupState.value = _backupState.value.copy(preview = null, settingsPending = result.settingsPending,
+            message = "Merged ${result.sessionsAdded} sessions, ${result.incidentsAdded} incidents, ${result.tasksAdded} tasks." +
+                if (result.settingsPending) " Settings restore is pending; retry to finish." else " Preferences restored; watch sync queued.")
+        if (!result.settingsPending) refreshRestoredSettings()
+    }
+
+    fun retryBackupSettings() = backupOperation {
+        backupRepository.finishPendingSettings()
+        refreshRestoredSettings()
+        _backupState.value = _backupState.value.copy(settingsPending = false, message = "Preferences restored; watch sync queued.")
+    }
+
+    private suspend fun refreshRestoredSettings() {
+        val timer = withContext(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
+        _timerSettings.value = timer
+        engine.applySettings(timer, resetTimer = false)
+        _focusGoalSettings.value = withContext(Dispatchers.IO) { focusGoalStore.load() }
+        refreshGoalClock()
+        withContext(Dispatchers.IO) { wearableSyncManager.refreshRestoredWatchFaceSettings() }
+        wearableSyncManager.pushStateToWearable(force = true)
+    }
+
+    private fun backupOperation(block: suspend () -> Unit) = viewModelScope.launch {
+        if (_backupState.value.busy) return@launch
+        _backupState.value = _backupState.value.copy(busy = true, message = null)
+        try { block() } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            _backupState.value = _backupState.value.copy(message = error.message ?: "The operation could not be completed")
+            Log.e("PomodoroViewModel", "Local backup operation failed", error)
+        } finally { _backupState.value = _backupState.value.copy(busy = false) }
+    }
+
+    suspend fun deleteLocalData(target: String): String = withContext(Dispatchers.IO) {
+        check(!_backupState.value.busy) { "Wait for the current backup operation" }
+        if (target in setOf("timer and daily target preferences", "watch face preferences", "watch artwork and face settings", "protection profiles")) {
+            check(database.restoreSettingsDao().pending() == null) { "Finish the pending settings restore before deleting preferences" }
+        }
+        when (target) {
+            "session history" -> database.sessionDao().clearAllSessions()
+            "incident history" -> database.panicDao().clearAllPanicLogs()
+            "tasks" -> database.focusTaskDao().clearAll()
+            "pending sync operations" -> database.syncOutboxDao().clearAll()
+            "timer and daily target preferences" -> {
+                check(database.restoreSettingsDao().pending() == null) { "Finish the pending settings restore before resetting preferences" }
+                timerSettingsStore.write(TimerSettings())
+                focusGoalStore.save(DailyFocusGoalSettings())
+                withContext(Dispatchers.Main) {
+                    _timerSettings.value = timerSettingsStore.loadAndMigrate()
+                    engine.applySettings(_timerSettings.value, resetTimer = false)
+                    _focusGoalSettings.value = focusGoalStore.load()
+                    refreshGoalClock()
+                    wearableSyncManager.pushStateToWearable(force = true)
+                }
+            }
+            "watch face preferences" -> wearableSyncManager.clearWatchFacePreferences()
+            "custom logo media" -> { wearableSyncManager.resetWatchFaceLogoAndAwait(); return@withContext "Logo reset queued for the watch" }
+            "watch artwork and face settings" -> {
+                wearableSyncManager.clearWatchFacePreferences()
+                wearableSyncManager.resetWatchFaceLogoAndAwait()
+                return@withContext "Face preferences deleted; logo reset queued for the watch"
+            }
+            "protection profiles" -> domainProfiles.clearAll()
+            else -> error("Unknown data category")
+        }
+        "Deleted $target"
+    }
 
     fun syncWatchFaceLogo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {

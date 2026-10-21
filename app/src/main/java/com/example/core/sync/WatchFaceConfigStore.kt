@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
@@ -21,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 
 data class WatchFacePreset(val id: String, val name: String, val config: WatchFaceConfig)
+data class WatchFacePreferences(val config: WatchFaceConfig, val presets: List<WatchFacePreset>, val recentColors: List<String>)
 
 data class WatchFaceConfig(
     val hourColor: String = "#ffff9800",
@@ -54,19 +56,7 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
 
     fun save(config: WatchFaceConfig) {
         runBlocking(Dispatchers.IO) {
-            dataStore.edit { preferences ->
-                preferences[HOUR] = config.hourColor
-                preferences[MINUTE] = config.minuteColor
-                preferences[SECOND] = config.secondColor
-                preferences[TEXT] = config.customText
-                preferences[SHOW_LOGO] = config.showLogo
-                preferences[PRESET] = config.preset
-                preferences[LEFT_SLOT_MODE] = config.leftSlotMode
-                preferences[BOTTOM_RIGHT_SLOT_MODE] = config.bottomRightSlotMode
-                preferences[AMBIENT_STYLE] = config.ambientStyle
-                config.localRevision?.let { preferences[LOCAL_REVISION] = it } ?: preferences.remove(LOCAL_REVISION)
-                config.appliedRevision?.let { preferences[APPLIED_REVISION] = it } ?: preferences.remove(APPLIED_REVISION)
-            }
+            dataStore.edit { writeConfig(it, config) }
         }
         _config.value = config
     }
@@ -99,6 +89,44 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
         val colors = (listOf(hex) + _recentColors.value).distinct().take(8)
         runBlocking(Dispatchers.IO) { dataStore.edit { it[RECENT_COLORS] = colors.toSet() } }
         _recentColors.value = colors
+    }
+
+    fun restore(config: WatchFaceConfig, presets: List<WatchFacePreset>, recentColors: List<String>) {
+        val restored = config.copy(localRevision = "restore-${java.util.UUID.randomUUID()}", appliedRevision = null)
+        runBlocking(Dispatchers.IO) {
+            dataStore.edit { preferences ->
+                writeConfig(preferences, restored)
+                preferences[USER_PRESETS] = presets.map { encodePreset(it.copy(config = it.config.withoutRevisions())) }.toSet()
+                preferences[RECENT_COLORS] = recentColors.take(8).toSet()
+            }
+        }
+        refresh()
+    }
+
+    private fun writeConfig(preferences: MutablePreferences, config: WatchFaceConfig) {
+        preferences[HOUR] = config.hourColor
+        preferences[MINUTE] = config.minuteColor
+        preferences[SECOND] = config.secondColor
+        preferences[TEXT] = config.customText
+        preferences[SHOW_LOGO] = config.showLogo
+        preferences[PRESET] = config.preset
+        preferences[LEFT_SLOT_MODE] = config.leftSlotMode
+        preferences[BOTTOM_RIGHT_SLOT_MODE] = config.bottomRightSlotMode
+        preferences[AMBIENT_STYLE] = config.ambientStyle
+        config.localRevision?.let { preferences[LOCAL_REVISION] = it } ?: preferences.remove(LOCAL_REVISION)
+        config.appliedRevision?.let { preferences[APPLIED_REVISION] = it } ?: preferences.remove(APPLIED_REVISION)
+    }
+
+    fun refresh() {
+        val preferences = runBlocking(Dispatchers.IO) { safePreferences().first() }
+        _config.value = read(preferences)
+        _presets.value = readPresets(preferences)
+        _recentColors.value = readRecentColors(preferences)
+    }
+
+    suspend fun snapshotForBackup(): WatchFacePreferences {
+        val preferences = dataStore.data.first()
+        return WatchFacePreferences(read(preferences), readPresets(preferences), readRecentColors(preferences))
     }
 
     private fun safePreferences() = dataStore.data.catch { error ->

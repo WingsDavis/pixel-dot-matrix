@@ -16,6 +16,15 @@ interface FocusTaskDao {
     @Query("SELECT * FROM focus_tasks WHERE status = 'PENDING' ORDER BY sortOrder ASC, createdAt ASC")
     suspend fun pending(): List<FocusTaskEntity>
 
+    @Query("SELECT * FROM focus_tasks ORDER BY sortOrder ASC, createdAt ASC")
+    suspend fun snapshot(): List<FocusTaskEntity>
+
+    @Query("DELETE FROM focus_tasks")
+    suspend fun clearAll()
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(task: FocusTaskEntity): Long
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(task: FocusTaskEntity)
 

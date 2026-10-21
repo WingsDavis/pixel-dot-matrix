@@ -23,3 +23,11 @@ analytics service.
 
 Permissions are requested for the relevant feature and can be revoked through
 Android settings. Local records and watch artwork can be deleted from the app.
+
+## Backups and Copies
+
+Automatic Android backup is disabled for the phone and Wear packages, with
+explicit storage exclusions for cloud backup and device transfer. User-initiated
+JSON/CSV exports use the selected Android document provider and are unencrypted.
+That provider can be cloud-backed. Existing exports or older platform backups
+are not removed by deleting local app data. See [Backup and Export](BACKUP.md).
