@@ -41,10 +41,11 @@ private data class WatchFaceDraft(val version: Long, val config: WatchFaceConfig
 class WearableSyncManager(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val engine: PomodoroEngine
-) : DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener {
+    private val engine: PomodoroEngine,
+    private val applyTimerCommand: suspend (TimerCommand) -> SyncAppliedAck,
+    private val timerSnapshotStore: TimerSnapshotStore = TimerSnapshotStore(context)
+) {
     private val watchFaceConfigStore = WatchFaceConfigStore(context)
-    private val timerSnapshotStore = TimerSnapshotStore(context)
     val watchFaceConfig = watchFaceConfigStore.config
     val watchFacePresets = watchFaceConfigStore.presets
     val watchFaceRecentColors = watchFaceConfigStore.recentColors
@@ -74,7 +75,6 @@ class WearableSyncManager(
     private var localNodeId = SOURCE_PHONE
     private var lastPublishedState = engine.currentState.value
     private var currentSnapshot = restoredTimerSnapshot ?: createTimerSnapshot(timerRevision.get())
-    private val handledCommandIds = LinkedHashSet<String>()
     private val watchFaceDraftVersion = AtomicLong(0L)
     private val lastSyncedDraftVersion = AtomicLong(0L)
     private val watchFaceDrafts = Channel<WatchFaceDraft>(Channel.CONFLATED)
@@ -83,9 +83,6 @@ class WearableSyncManager(
     private var hasPublishedInProcess = false
 
     init {
-        // Register listeners to handle incoming sync updates bidirectionally
-        dataClient.addListener(this)
-        messageClient.addListener(this)
         scope.launch(Dispatchers.IO) {
             localNodeId = runCatching { nodeClient.localNode.await().id }.getOrDefault(SOURCE_PHONE)
         }
@@ -137,21 +134,23 @@ class WearableSyncManager(
      * Standard path used for sync: /pomodoro/state
      */
     @Synchronized
-    fun pushStateToWearable(force: Boolean = false) {
+    fun pushStateToWearable(force: Boolean = false, commandId: String? = null) {
         val now = System.currentTimeMillis()
         val expectedSeconds = TimerSnapshotResolver.remainingAt(currentSnapshot, now)
         val hasMeaningfulChange = currentSnapshot.authority != TimerAuthority.PHONE ||
             currentSnapshot.state != engine.currentState.value ||
             currentSnapshot.isRunning != engine.isRunning.value ||
             kotlin.math.abs(expectedSeconds - engine.secondsRemaining.value) > 1
-        if (hasPublishedInProcess && !hasMeaningfulChange && !force) return
-        if (lastPublishedState != engine.currentState.value) {
+        val advancesRevision = hasMeaningfulChange || force || commandId != null
+        if (hasPublishedInProcess && !advancesRevision) return
+        if (advancesRevision && lastPublishedState != engine.currentState.value) {
             timerSessionId = UUID.randomUUID().toString()
-            lastPublishedState = engine.currentState.value
         }
-        val snapshot = createTimerSnapshot(timerRevision.incrementAndGet())
+        val snapshot = if (advancesRevision) createTimerSnapshot(timerRevision.get() + 1) else currentSnapshot
+        if (advancesRevision || timerSnapshotStore.load() == null) timerSnapshotStore.save(snapshot, commandId)
+        lastPublishedState = engine.currentState.value
         currentSnapshot = snapshot
-        timerSnapshotStore.save(snapshot)
+        timerRevision.set(snapshot.revision)
         val isPanic = snapshot.state == PomodoroState.PANIC_MODE
         scope.launch(Dispatchers.IO) {
             try {
@@ -380,90 +379,61 @@ class WearableSyncManager(
      * Responds to changes in data items on the shared channel.
      * This handles bidirectional synchronization of state.
      */
-    override fun onDataChanged(dataEvents: DataEventBuffer) {
-        for (event in dataEvents) {
-            if (event.type == DataEvent.TYPE_CHANGED) {
-                val item = event.dataItem
-                if (item.uri.path == PATH_POMODORO_STATE) {
-                    val dataMap = DataMapItem.fromDataItem(item).dataMap
-                    if (dataMap.getString(KEY_SOURCE_DEVICE) == SOURCE_PHONE) continue
-                    val stateStr = dataMap.getString(KEY_STATE) ?: continue
-                    val seconds = dataMap.getInt(KEY_SECONDS_REMAINING)
-                    val isRunning = dataMap.getBoolean(KEY_IS_RUNNING)
-
-                    try {
-                        val state = PomodoroState.valueOf(stateStr)
-                        val incoming = TimerSnapshot(
-                            revision = dataMap.getLong(KEY_TIMER_REVISION, -1L),
-                            sessionId = dataMap.getString(KEY_SESSION_ID) ?: "legacy",
-                            sourceDevice = dataMap.getString(KEY_SOURCE_NODE)
-                                ?: dataMap.getString(KEY_SOURCE_DEVICE)
-                                ?: SOURCE_WEAR,
-                            authority = runCatching {
-                                TimerAuthority.valueOf(dataMap.getString(KEY_AUTHORITY) ?: TimerAuthority.WEAR.name)
-                            }.getOrDefault(TimerAuthority.WEAR),
-                            state = state,
-                            secondsRemaining = seconds,
-                            isRunning = isRunning,
-                            updatedAtEpochMs = dataMap.getLong(KEY_TIMESTAMP, 0L),
-                            anchorElapsedRealtimeMs = dataMap.getLong(KEY_ANCHOR_ELAPSED_REALTIME, 0L),
-                            leaseExpiresAtEpochMs = dataMap.getLong(KEY_LEASE_EXPIRES_AT, 0L),
-                            completedFocusSessions = dataMap.getInt(KEY_COMPLETED_FOCUS_SESSIONS, 0)
-                        )
-                        val resolution = TimerSnapshotResolver.resolve(
-                            local = currentSnapshot,
-                            incoming = incoming,
-                            wearLeaseExpiresAtEpochMs = incoming.leaseExpiresAtEpochMs,
-                            nowEpochMs = System.currentTimeMillis()
-                        )
-                        if (resolution is SnapshotResolution.Accept) {
-                            currentSnapshot = resolution.snapshot
-                            timerSnapshotStore.save(resolution.snapshot)
-                            timerRevision.set(maxOf(timerRevision.get(), incoming.revision))
-                            scope.launch(Dispatchers.Main) {
-                                val reconciledSeconds = TimerSnapshotResolver.remainingAt(
-                                    incoming,
-                                    System.currentTimeMillis()
-                                )
-                                engine.syncState(state, reconciledSeconds, isRunning)
-                                engine.restoreCompletedFocusSessions(incoming.completedFocusSessions)
-                            }
-                        } else if (resolution is SnapshotResolution.Reject) {
-                            Log.d(TAG, "Rejected Wear snapshot revision=${incoming.revision}: ${resolution.reason}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error matching synchronized state name: $stateStr", e)
-                    }
-                } else if (item.uri.path == PATH_WATCHFACE_STATUS_V2) {
-                    val dataMap = DataMapItem.fromDataItem(item).dataMap
-                    val revision = dataMap.getString(KEY_REVISION) ?: continue
-                    if (pendingWatchFaceRevision != null && pendingWatchFaceRevision != revision) {
-                        continue
-                    }
-
-                    val success = dataMap.getBoolean(KEY_SUCCESS, false)
-                    val appliedAt = dataMap.getLong(KEY_APPLIED_AT, 0L).takeIf { it > 0L }
-                    _watchFaceSyncStatus.value = WatchFaceSyncStatus(
-                        phase = if (success) WatchFaceSyncPhase.APPLIED else WatchFaceSyncPhase.FAILED,
-                        revision = revision,
-                        message = dataMap.getString(KEY_STATUS_MESSAGE)
-                            ?: if (success) "Complications synced" else "Watch rejected configuration",
-                        appliedAt = appliedAt
-                    )
-                    if (success) pendingWatchFaceRevision = null
-                    if (success) watchFaceConfigStore.markApplied(revision)
-                }
+    fun handleData(path: String, dataMap: DataMap): Boolean {
+        if (path == PATH_POMODORO_STATE) {
+            if (dataMap.getString(KEY_SOURCE_DEVICE) == SOURCE_PHONE) return false
+            val state = PomodoroState.valueOf(dataMap.getString(KEY_STATE) ?: return false)
+            val incoming = TimerSnapshot(
+                revision = dataMap.getLong(KEY_TIMER_REVISION, -1L),
+                sessionId = dataMap.getString(KEY_SESSION_ID) ?: "legacy",
+                sourceDevice = dataMap.getString(KEY_SOURCE_NODE) ?: dataMap.getString(KEY_SOURCE_DEVICE) ?: SOURCE_WEAR,
+                authority = runCatching {
+                    TimerAuthority.valueOf(dataMap.getString(KEY_AUTHORITY) ?: TimerAuthority.WEAR.name)
+                }.getOrDefault(TimerAuthority.WEAR),
+                state = state,
+                secondsRemaining = dataMap.getInt(KEY_SECONDS_REMAINING),
+                isRunning = dataMap.getBoolean(KEY_IS_RUNNING),
+                updatedAtEpochMs = dataMap.getLong(KEY_TIMESTAMP, 0L),
+                anchorElapsedRealtimeMs = dataMap.getLong(KEY_ANCHOR_ELAPSED_REALTIME, 0L),
+                leaseExpiresAtEpochMs = dataMap.getLong(KEY_LEASE_EXPIRES_AT, 0L),
+                completedFocusSessions = dataMap.getInt(KEY_COMPLETED_FOCUS_SESSIONS, 0)
+            )
+            val resolution = TimerSnapshotResolver.resolve(currentSnapshot, incoming,
+                incoming.leaseExpiresAtEpochMs, System.currentTimeMillis())
+            if (resolution is SnapshotResolution.Accept) {
+                timerSnapshotStore.save(resolution.snapshot)
+                currentSnapshot = resolution.snapshot
+                timerRevision.set(maxOf(timerRevision.get(), incoming.revision))
+                engine.syncState(state, TimerSnapshotResolver.remainingAt(incoming, System.currentTimeMillis()), incoming.isRunning)
+                engine.restoreCompletedFocusSessions(incoming.completedFocusSessions)
+                return true
+            }
+            Log.d(TAG, "Rejected Wear snapshot revision=${incoming.revision}: ${(resolution as SnapshotResolution.Reject).reason}")
+        } else if (path == PATH_WATCHFACE_STATUS_V2) {
+            val revision = dataMap.getString(KEY_REVISION) ?: return false
+            if (pendingWatchFaceRevision != null && pendingWatchFaceRevision != revision) return false
+            val success = dataMap.getBoolean(KEY_SUCCESS, false)
+            _watchFaceSyncStatus.value = WatchFaceSyncStatus(
+                phase = if (success) WatchFaceSyncPhase.APPLIED else WatchFaceSyncPhase.FAILED,
+                revision = revision,
+                message = dataMap.getString(KEY_STATUS_MESSAGE) ?: if (success) "Complications synced" else "Watch rejected configuration",
+                appliedAt = dataMap.getLong(KEY_APPLIED_AT, 0L).takeIf { it > 0L }
+            )
+            if (success) {
+                pendingWatchFaceRevision = null
+                watchFaceConfigStore.markApplied(revision)
             }
         }
+        return false
     }
 
     /**
      * Responds to immediate messages (e.g., watch user tapped shortcut button to trigger Panic Mode)
      */
-    override fun onMessageReceived(messageEvent: MessageEvent) {
-        when (messageEvent.path) {
+    suspend fun handleMessage(path: String, sourceNodeId: String, payload: ByteArray) {
+        when (path) {
             PATH_SYNC_ACK -> {
-                val acknowledgement = SyncAppliedAck.decode(messageEvent.data) ?: return
+                val acknowledgement = SyncAppliedAck.decode(payload) ?: return
                 scope.launch(Dispatchers.IO) {
                     if (acknowledgement.applied) {
                         syncOutbox.markApplied(acknowledgement.id)
@@ -472,60 +442,28 @@ class WearableSyncManager(
                     }
                 }
             }
-            PATH_PANIC_TRIGGER -> {
-                scope.launch(Dispatchers.Main) {
-                    engine.triggerPanic()
-                    pushStateToWearable()
+            PATH_PANIC_TRIGGER, PATH_PANIC_RESOLVE, PATH_POMODORO_CONTROL -> {
+                val decoded = TimerCommand.decode(payload) ?: return
+                val command = when (path) {
+                    PATH_PANIC_TRIGGER -> decoded.copy(action = "PANIC", baseRevision = -1)
+                    PATH_PANIC_RESOLVE -> decoded.copy(action = "RESOLVE_PANIC", baseRevision = -1)
+                    else -> decoded
                 }
-            }
-            PATH_PANIC_RESOLVE -> {
-                scope.launch(Dispatchers.Main) {
-                    // Resolve panic if we are in panic mode and remote confirmed it
-                    if (engine.currentState.value == PomodoroState.PANIC_MODE) {
-                        engine.resolvePanic()
-                    }
-                }
-            }
-            PATH_POMODORO_CONTROL -> {
-                val command = TimerCommand.decode(messageEvent.data) ?: return
-                scope.launch(Dispatchers.Main) {
-                    if (!TimerSnapshotResolver.commandIsAcceptable(command, timerRevision.get())) {
-                        Log.d(TAG, "Rejected stale timer command id=${command.id} base=${command.baseRevision} current=${timerRevision.get()}")
-                        sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, false, "Timer state changed before command arrived")
-                        return@launch
-                    }
-                    if (!markCommandHandled(command.id)) {
-                        sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, true, null)
-                        return@launch
-                    }
-                    when (command.action) {
-                        "START" -> engine.start()
-                        "PAUSE" -> engine.pause()
-                        "SKIP" -> engine.skip()
-                        "RESET" -> engine.reset()
-                        "START_FOCUS" -> {
-                            engine.pause()
-                            engine.syncState(PomodoroState.FOCUS, engine.focusDuration, true)
-                        }
-                        "START_SHORT_BREAK" -> {
-                            engine.pause()
-                            engine.syncState(PomodoroState.SHORT_BREAK, engine.shortBreakDuration, true)
-                        }
-                        "START_LONG_BREAK" -> {
-                            engine.pause()
-                            engine.syncState(PomodoroState.LONG_BREAK, engine.longBreakDuration, true)
-                        }
-                    }
-                    pushStateToWearable()
-                    sendTimerCommandAcknowledgement(messageEvent.sourceNodeId, command.id, true, null)
-                }
+                val acknowledgement = applyTimerCommand(command)
+                sendTimerCommandAcknowledgement(sourceNodeId, command.id, acknowledgement.applied, acknowledgement.message)
             }
         }
     }
 
-    fun unregisterListeners() {
-        dataClient.removeListener(this)
-        messageClient.removeListener(this)
+    fun currentTimerSnapshot(): TimerSnapshot = currentSnapshot
+
+    fun wasCommandApplied(id: String): Boolean = timerSnapshotStore.wasCommandApplied(id)
+
+    fun reloadTimerSnapshot(): TimerSnapshot? = timerSnapshotStore.load()?.also {
+        currentSnapshot = it
+        timerRevision.set(it.revision)
+        timerSessionId = it.sessionId
+        lastPublishedState = it.state
     }
 
     fun retryPendingSync() {
@@ -639,15 +577,6 @@ class WearableSyncManager(
         completedFocusSessions = engine.completedFocusSessions,
         activeFocusInterval = engine.activeFocusInterval.value
     )
-
-    @Synchronized
-    private fun markCommandHandled(commandId: String): Boolean {
-        if (!handledCommandIds.add(commandId)) return false
-        while (handledCommandIds.size > MAX_HANDLED_COMMANDS) {
-            handledCommandIds.remove(handledCommandIds.first())
-        }
-        return true
-    }
 
     companion object {
         private const val TAG = "WearableSyncManager"

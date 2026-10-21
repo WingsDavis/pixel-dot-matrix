@@ -20,6 +20,19 @@ The phone and watch communicate through the Wear OS Data Layer.
   authority marker to reject stale updates.
 - Watch-face configuration is acknowledged by revision after Wear persistence.
 
+## Phone Timer Ownership
+
+`TimerRuntime` owns one process-wide engine, settings, task accounting, timer
+snapshots, and Wear synchronization. The phone ViewModel, Quick Settings tile,
+foreground timer host, and background Wear listener use that same runtime.
+Only the visible phone UI registers its motion sensor and panic haptics.
+
+The foreground host keeps a user-started countdown available after the Activity
+closes. It restores state on restart instead of replaying a toggle. Monotonic
+elapsed-time reconciliation accounts for delayed ticks; persisted snapshots and
+stable focus-record IDs cover process recreation. See
+[Quick Settings Timer](QUICK_SETTINGS.md) for platform limits and verification.
+
 ## Data
 
 The phone stores sessions, incidents, and pending sync operations in Room.

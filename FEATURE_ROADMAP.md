@@ -21,11 +21,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | Phase | Items | Complete | In progress | Partial | Not started |
 |---|---:|---:|---:|---:|---:|
 | 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
-| 2. Phone productivity | 6-10 | 1 | 3 | 0 | 1 |
+| 2. Phone productivity | 6-10 | 2 | 3 | 0 | 0 |
 | 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **6** | **12** | **0** | **2** |
+| **Total** | **20** | **7** | **12** | **0** | **1** |
 
 ## Master Tracker
 
@@ -40,7 +40,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 7 | Daily focus target | P1 | `[~]` | 1, 2 |
 | 8 | Useful insights | P1 | `[~]` | 7 |
 | 9 | Backup and export | P2 | `[~]` | 1, 8 |
-| 10 | Android Quick Settings tile | P1 | `[ ]` | 2 |
+| 10 | Android Quick Settings tile | P1 | `[x]` | 2 |
 | 11 | Actionable complications | P1 | `[~]` | 2, 3, 7 |
 | 12 | Watch-side quick actions | P1 | `[~]` | 2, 3 |
 | 13 | Better haptic language | P1 | `[~]` | 1, 5 |
@@ -177,8 +177,11 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Process recreation retains active focus, replays pending pauses/completions
   once, and preserves old history through the additive Room 7 -> 8 migration.
 - The phone UI has a rendered 360dp large-text check. All three APK modules build.
-- Physical phone/watch synchronization and watch-face complication refresh still
-  need a connected-device check. Keep this item in progress until that passes.
+- On 2026-10-21, a QA-only fixture on Pixel 9 (API 37) published a session target
+  of 3 with one completed focus. Pixel Watch 3 (API 37) stored the same enabled
+  target, completed count, focus time, timezone, and reset boundary.
+- Visible watch target and watch-face complication refresh still need a
+  connected-device check. Keep this item in progress until that passes.
 - Wear displays the latest phone-authored goal snapshot while disconnected and
   expires that snapshot at its daily reset boundary.
 
@@ -196,9 +199,9 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 **Acceptance criteria**
 - [x] Every metric has one documented formula in `docs/INSIGHTS.md`.
-- [ ] Empty, partial, and large datasets render correctly.
+- [x] Empty, partial, and large datasets render correctly.
 - [x] Metric tests use fixed timestamps and expected results.
-- [ ] Screen remains responsive with at least 10,000 local records.
+- [x] Screen remains responsive with at least 10,000 local records.
 
 **Implementation notes**
 - Date presets/custom dates, recorded-task filters, and incident-category filters
@@ -210,10 +213,13 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Fixed-time logic, isolated picker search/selection, and 10,000-record
   aggregation/lazy-navigation tests pass. Render checks cover 360dp at 1.3x/2x
   text and landscape. The device dialog integration test compiles in CI.
-- Native dialog-window interaction, TalkBack, and physical-phone responsiveness
-  remain unverified: no phone or emulator was connected. The host test renderer
-  stalls on native dialog-window idling; picker content is tested separately.
-  Keep this item in progress until the connected-device check passes.
+- Pixel 9 API 37 passed the native date/task/category picker integration,
+  weekly/reset controls, empty and incident-only states, and 10,000-record
+  navigation/search on 2026-10-21. Last-row navigation took 120 ms. The fixture
+  tests do not modify the normal app's history.
+- TalkBack remains unverified. The host renderer's native-dialog idling problem
+  does not reproduce in the physical-phone picker test. Keep the overall item
+  in progress until the accessibility check is complete.
 
 ### 9. Backup and Export `[~]`
 
@@ -241,7 +247,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Native file-provider, disk-full/process-kill, and connected-watch application
   remain device checks. Keep the feature in progress until those pass.
 
-### 10. Android Quick Settings Tile `[ ]`
+### 10. Android Quick Settings Tile `[x]`
 
 **Scope**
 - Add a `TileService` with start/pause as the primary action.
@@ -249,10 +255,31 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Reflect current timer phase and running state.
 
 **Acceptance criteria**
-- [ ] Tile state updates after phone or watch commands.
-- [ ] Action works when the application UI is closed.
-- [ ] Locked-device behavior is explicit and secure.
-- [ ] Tile does not create duplicate timer engines.
+- [x] Tile state updates after phone or watch commands.
+- [x] Action works when the application UI is closed.
+- [x] Locked-device behavior is explicit and secure.
+- [x] Tile does not create duplicate timer engines.
+
+**Implementation and verification**
+- One application-scoped runtime backs the tile, phone UI, foreground host, and
+  background Wear listener. Sensor and panic haptics remain UI-owned.
+- Host tests cover cold hydration, persisted command deduplication, foreground
+  denial, post-memory failed commits, canceled reconciliation/restoration,
+  queued settings, automation/task accounting, and bounded tile refreshes.
+- The full gate passed 133 phone and 3 Wear tests plus all three APK builds.
+- Pixel 9 API 37 passed both QA lifecycle tests on 2026-10-21: closing the UI
+  retains the timer, duplicate pause is harmless, and a real 60-second focus
+  completes once into a running break with one saved interval and notification.
+- The real system tile recreated the phone process and started the timer. A
+  Pixel Watch 3 API 37 pause changed its label to `Focus start` and persisted the
+  command. The secondary action resolves to the phone controls.
+- The user's lock/cancel/normal-unlock retest passed after removing deferred
+  toggles. The timer remained paused with identical seconds, revision, and
+  timestamp. Fresh unlocked tile Start/Pause then worked. Locked taps open
+  controls without scheduling a timer mutation.
+- Notification denial, long-duration Doze/OEM battery restrictions, and Play
+  `specialUse` approval are not established by the physical checks. See
+  `docs/QUICK_SETTINGS.md`.
 
 ## Phase 3: Wear Experience
 

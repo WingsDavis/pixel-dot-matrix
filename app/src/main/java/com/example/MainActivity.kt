@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,44 +57,7 @@ class MainActivity : ComponentActivity() {
                 val totalSteps = intent.getIntExtra("steps", 50)
                 viewModel.setSteps(totalSteps)
                 viewModel.incrementStepsSimulated() // simulated extra step to fulfill 50 if needed
-                viewModel.engine.resolvePanic()
-            }
-        }
-    }
-
-    private val wearControlReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "com.example.wear.CONTROL_MESSAGE") {
-                val path = intent.getStringExtra("path")
-                val payload = intent.getStringExtra("payload") ?: ""
-                Log.d("MainActivity", "Received wear control broadcast: path=$path, payload=$payload")
-                if (path == "/pomodoro/control") {
-                    when (payload) {
-                        "START" -> viewModel.startTimer()
-                        "PAUSE" -> viewModel.pauseTimer()
-                        "SKIP" -> viewModel.skipTimer()
-                        "RESET" -> viewModel.resetTimer()
-                        "START_FOCUS" -> {
-                            viewModel.engine.pause()
-                            viewModel.engine.syncState(PomodoroState.FOCUS, viewModel.engine.focusDuration, true)
-                        }
-                        "START_SHORT_BREAK" -> {
-                            viewModel.engine.pause()
-                            viewModel.engine.syncState(PomodoroState.SHORT_BREAK, viewModel.engine.shortBreakDuration, true)
-                        }
-                        "START_LONG_BREAK" -> {
-                            viewModel.engine.pause()
-                            viewModel.engine.syncState(PomodoroState.LONG_BREAK, viewModel.engine.longBreakDuration, true)
-                        }
-                    }
-                } else if (path == "/panic/resolve") {
-                    viewModel.engine.resolvePanic()
-                } else if (path == "/panic/trigger") {
-                    viewModel.triggerPanic()
-                } else if (path == "/incident/mark") {
-                    val incidentId = payload.split('|').getOrNull(1) ?: java.util.UUID.randomUUID().toString()
-                    viewModel.markDistractionFromWear(incidentId)
-                }
+                viewModel.resolvePanicManually()
             }
         }
     }
@@ -110,13 +72,10 @@ class MainActivity : ComponentActivity() {
 
         // Register observers
         val filter = IntentFilter(PanicOverlayService.ACTION_OVERLAY_DISMISSED)
-        val controlFilter = IntentFilter("com.example.wear.CONTROL_MESSAGE")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(overlayReceiver, filter, RECEIVER_NOT_EXPORTED)
-            registerReceiver(wearControlReceiver, controlFilter, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(overlayReceiver, filter)
-            registerReceiver(wearControlReceiver, controlFilter)
         }
 
         setContent {
@@ -150,7 +109,7 @@ class MainActivity : ComponentActivity() {
                         PanicOverlayContent(
                             steps = steps,
                             onDismiss = {
-                                viewModel.engine.resolvePanic()
+                                viewModel.resolvePanicManually()
                             },
                             onSimulateStep = {
                                 viewModel.incrementStepsSimulated()
@@ -209,15 +168,20 @@ class MainActivity : ComponentActivity() {
         viewModel.resumePendingSync()
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.setUiActive(true)
+    }
+
+    override fun onStop() {
+        viewModel.setUiActive(false)
+        super.onStop()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {
             unregisterReceiver(overlayReceiver)
-        } catch (e: Exception) {
-            // Safe ignore
-        }
-        try {
-            unregisterReceiver(wearControlReceiver)
         } catch (e: Exception) {
             // Safe ignore
         }

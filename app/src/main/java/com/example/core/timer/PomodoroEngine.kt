@@ -36,7 +36,8 @@ class PomodoroEngine(
     private val scope: CoroutineScope,
     initialSettings: TimerSettings = TimerSettings(),
     private val timerDispatcher: CoroutineDispatcher = Dispatchers.Main,
-    private val onFocusIntervalRecorded: (FocusInterval) -> Unit = {}
+    private val onFocusIntervalRecorded: (FocusInterval) -> Unit = {},
+    private val onTick: (() -> Unit)? = null
 ) {
     var focusDuration = initialSettings.focusDurationSeconds
         private set
@@ -142,6 +143,10 @@ class PomodoroEngine(
         timerJob = scope.launch(timerDispatcher) {
             while (_isRunning.value) {
                 delay(1000)
+                if (onTick != null) {
+                    onTick.invoke()
+                    continue
+                }
                 if (_secondsRemaining.value > 0) {
                     _activeFocusInterval.value = _activeFocusInterval.value?.let {
                         it.copy(durationSeconds = it.durationSeconds + 1)
@@ -261,6 +266,16 @@ class PomodoroEngine(
 
     fun restoreActiveFocusInterval(interval: FocusInterval?) {
         _activeFocusInterval.value = interval.takeIf { _currentState.value == PomodoroState.FOCUS && _isRunning.value }
+    }
+
+    internal fun restore(timer: TimerReconciliation) {
+        timerJob?.cancel()
+        _currentState.value = timer.state
+        _secondsRemaining.value = timer.secondsRemaining
+        _isRunning.value = timer.isRunning
+        restoreCompletedFocusSessions(timer.completedFocusSessions)
+        restoreActiveFocusInterval(timer.activeFocusInterval)
+        if (timer.isRunning) startTimerJob()
     }
 
     // Adapt timer duration dynamically based on biometric feedback

@@ -34,7 +34,27 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+
+        <service android:name="com.example.service.PomodoroTileService"
+            android:exported="true" android:label="@string/timer_tile_label"
+            android:icon="@drawable/ic_timer_tile" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="true" />
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+        </service>
+
+        <service android:name="com.example.service.TimerForegroundService"
+            android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started Pomodoro focus and break countdown with an ongoing notification, phone/watch controls, and session completion accounting while the app UI is closed." />
+        </service>
 
         <service
             android:name="com.example.service.PanicOverlayService"
@@ -64,6 +84,7 @@
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/pomodoro" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/panic" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/incident" />
             </intent-filter>
         </service>
     </application>

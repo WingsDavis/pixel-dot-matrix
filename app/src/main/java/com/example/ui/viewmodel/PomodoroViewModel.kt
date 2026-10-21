@@ -2,8 +2,6 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -11,33 +9,23 @@ import android.hardware.SensorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.core.content.ContextCompat
-import com.example.core.goal.DailyFocusCalculator
 import com.example.core.goal.DailyFocusGoalSettings
 import com.example.core.backup.BackupRepository
 import com.example.core.backup.BackupCodec
 import com.example.core.backup.BackupDocument
 import com.example.core.goal.DailyFocusGoalStore
 import com.example.core.goal.FocusTargetType
-import com.example.core.timer.PomodoroEngine
+import com.example.core.timer.TimerRuntime
 import com.example.core.timer.PomodoroState
 import com.example.core.timer.TimerSettings
 import com.example.core.timer.TimerSettingsStore
-import com.example.core.timer.SessionTransitionNotifier
-import com.example.core.timer.TimerTransitionCause
-import com.example.core.timer.TimerAutomationReconciler
-import com.example.core.timer.FocusInterval
-import com.example.core.sync.TimerSnapshotStore
 import com.example.data.database.AppDatabase
 import com.example.data.entity.PanicLogEntity
 import com.example.data.entity.IncidentStatus
-import com.example.data.entity.SessionLogEntity
-import com.example.data.entity.FocusTaskEntity
 import com.example.data.repository.PomodoroRepository
-import com.example.data.repository.FocusTaskRepository
 import com.example.domain.FocusInsights
 import com.example.domain.InsightsCalculator
 import com.example.domain.InsightsFilter
-import com.example.core.sync.WearableSyncManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -61,7 +49,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
@@ -69,60 +56,23 @@ import com.example.core.protection.DomainProfileStore
 
 class PomodoroViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
 
+    private val runtime = TimerRuntime.get(application).also { runBlocking(Dispatchers.IO) { it.awaitReady() } }
     private val database = AppDatabase.getDatabase(application)
     private val backupRepository = BackupRepository(application, database)
-    private val restoredBackupSettings = runBlocking(Dispatchers.IO) { runCatching { backupRepository.finishPendingSettings() } }
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
-    private val taskRepository = FocusTaskRepository(database.focusTaskDao())
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
-    private val initialTimerSettings = runBlocking(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
-    private val timerSnapshotStore = TimerSnapshotStore(application)
-    private val panicRuntimePreferences = application.getSharedPreferences("panic_runtime", Context.MODE_PRIVATE)
-    private var livePanicIncidentId: String? = panicRuntimePreferences.getString("active_incident_id", null)
-    private val restoredTimerSnapshot = timerSnapshotStore.load()
-    private val pendingFocusIntervals = timerSnapshotStore.pendingFocusIntervals()
-    private val restoredTimer = restoredTimerSnapshot?.let {
-        TimerAutomationReconciler.reconcile(it, initialTimerSettings, System.currentTimeMillis(), pendingFocusIntervals)
-    }.also { reconciled ->
-        runBlocking(Dispatchers.IO) {
-            val pending = pendingFocusIntervals
-            (pending + reconciled?.focusIntervals.orEmpty()).distinctBy { it.id }.forEach { interval ->
-                repository.insertSessionIfAbsent(interval.toSessionLog())
-            }
-            if (reconciled != null && restoredTimerSnapshot != null) {
-                timerSnapshotStore.save(
-                    restoredTimerSnapshot.copy(
-                        revision = restoredTimerSnapshot.revision + 1,
-                        state = reconciled.state,
-                        secondsRemaining = reconciled.secondsRemaining,
-                        isRunning = reconciled.isRunning,
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                        completedFocusSessions = reconciled.completedFocusSessions,
-                        activeFocusInterval = reconciled.activeFocusInterval
-                    )
-                )
-            }
-            pending.forEach { timerSnapshotStore.removePendingFocusInterval(it.id) }
-        }
-    }
-    private val timerSettingsUpdates = Channel<TimerSettings>(Channel.CONFLATED)
-    private val transitionNotifier = SessionTransitionNotifier(application)
     private val focusGoalStore = DailyFocusGoalStore(application)
-    private val _focusGoalSettings = MutableStateFlow(runBlocking(Dispatchers.IO) { focusGoalStore.load() })
-    private val focusGoalUpdates = Channel<DailyFocusGoalSettings>(Channel.CONFLATED)
-    private val goalClock = MutableStateFlow(System.currentTimeMillis())
-    private val _focusGoalSaveError = MutableStateFlow<String?>(null)
-    val focusGoalSaveError = _focusGoalSaveError.asStateFlow()
+    private val _focusGoalSettings = runtime.goalSettings
+    val focusGoalSaveError = runtime.focusGoalSaveError
     private val _backupState = MutableStateFlow(BackupUiState(
-        settingsPending = restoredBackupSettings.isFailure,
-        message = if (restoredBackupSettings.isFailure) "A settings restore is pending. Retry it before importing another backup." else null
+        settingsPending = runtime.settingsPending.value,
+        message = if (runtime.settingsPending.value) "A settings restore is pending. Retry it before importing another backup." else null
     ))
     val backupState = _backupState.asStateFlow()
     private var preparedBackup: BackupDocument? = null
 
-    val sessionLogs: StateFlow<List<SessionLogEntity>> = repository.allSessions
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val sessionLogs = runtime.sessionLogs
 
     val panicLogs: StateFlow<List<PanicLogEntity>> = repository.allPanicLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -145,46 +95,18 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         _insightsFilter.value = filter
     }
 
-    val focusTasks: StateFlow<List<FocusTaskEntity>> = taskRepository.pendingTasks
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    private val taskSelectionPreferences = application.getSharedPreferences("task_selection", Context.MODE_PRIVATE)
-    private val _selectedTaskId = MutableStateFlow(taskSelectionPreferences.getString("selected_task_id", null))
-    val selectedTask: StateFlow<FocusTaskEntity?> = combine(focusTasks, _selectedTaskId) { tasks, selectedId ->
-        tasks.firstOrNull { it.id == selectedId } ?: tasks.firstOrNull()
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    val engine = PomodoroEngine(
-        viewModelScope,
-        initialTimerSettings,
-        onFocusIntervalRecorded = timerSnapshotStore::savePendingFocusInterval
-    ).apply {
-        restoredTimer?.let { timer ->
-            syncState(
-                timer.state,
-                timer.secondsRemaining,
-                timer.isRunning
-            )
-            restoreCompletedFocusSessions(timer.completedFocusSessions)
-            restoreActiveFocusInterval(timer.activeFocusInterval)
-        }
-    }
-
-    private val _timerSettings = MutableStateFlow(initialTimerSettings)
-    val timerSettings: StateFlow<TimerSettings> = _timerSettings.asStateFlow()
+    val focusTasks = runtime.focusTasks
+    val selectedTask = runtime.selectedTask
+    val engine = runtime.engine
+    val timerSettings = runtime.timerSettings
 
     val currentState: StateFlow<PomodoroState> = engine.currentState
     val secondsRemaining: StateFlow<Int> = engine.secondsRemaining
     val isRunning: StateFlow<Boolean> = engine.isRunning
 
-    val dailyFocusProgress = combine(sessionLogs, _focusGoalSettings, engine.activeFocusInterval, goalClock) { sessions, settings, active, now ->
-        DailyFocusCalculator.calculate(sessions, settings, maxOf(now, active?.endTimeMillis ?: now), active)
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        DailyFocusCalculator.calculate(emptyList(), _focusGoalSettings.value, goalClock.value)
-    )
+    val dailyFocusProgress = runtime.dailyFocusProgress
 
-    private val wearableSyncManager = WearableSyncManager(application, viewModelScope, engine)
+    private val wearableSyncManager = runtime.syncManager
     val watchFaceSyncStatus = wearableSyncManager.watchFaceSyncStatus
     val watchFaceConfig = wearableSyncManager.watchFaceConfig
     val watchFacePresets = wearableSyncManager.watchFacePresets
@@ -193,11 +115,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     val connectedWatchCount = wearableSyncManager.connectedNodeCount
 
     // Step Counter state
-    private val _stepsTakenInPanic = MutableStateFlow(0)
-    val stepsTakenInPanic: StateFlow<Int> = _stepsTakenInPanic.asStateFlow()
+    val stepsTakenInPanic = runtime.stepsTakenInPanic
 
     // Incident Response Distraction Audit state
-    private val _activeIncidentAudit = MutableStateFlow<PanicLogEntity?>(null)
+    private val _activeIncidentAudit = runtime.activeIncidentAudit
     val activeIncidentAudit: StateFlow<PanicLogEntity?> = _activeIncidentAudit.asStateFlow()
 
     // Local DNS Sinkhole VPN state
@@ -206,7 +127,6 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     val currentTaskName: StateFlow<String> = selectedTask.map { it?.title.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    private var activeFocusTaskSnapshot: FocusTaskEntity? = null
 
     // On-Device Predictive Vulnerability Engine
     val predictiveVulnerabilityText: StateFlow<String> = panicLogs.map { logs ->
@@ -243,189 +163,46 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var stepDetectorSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
-    private var initialStepCount = -1f
-    private val goalTimeReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = refreshGoalClock()
-    }
+    private val uiActive = MutableStateFlow(false)
 
     init {
-        if (currentState.value != PomodoroState.PANIC_MODE) livePanicIncidentId = null
-        ContextCompat.registerReceiver(
-            application,
-            goalTimeReceiver,
-            IntentFilter().apply {
-                addAction(Intent.ACTION_TIMEZONE_CHANGED)
-                addAction(Intent.ACTION_TIME_CHANGED)
-                addAction(Intent.ACTION_DATE_CHANGED)
-            },
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-        refreshGoalClock()
         viewModelScope.launch {
-            while (isActive) {
-                refreshGoalClock()
-                delay(15_000L)
-            }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            for (settings in focusGoalUpdates) {
-                runCatching { focusGoalStore.save(settings) }
-                    .onSuccess { _focusGoalSaveError.value = null }
-                    .onFailure {
-                        _focusGoalSaveError.value = "Could not save the daily target. Try changing it again."
-                        Log.e("PomodoroViewModel", "Failed to save daily focus target", it)
-                    }
-            }
-        }
-        viewModelScope.launch {
-            dailyFocusProgress.map { it.copy(focusedSeconds = it.focusedSeconds / 60 * 60) }
-                .distinctUntilChanged()
-                .collect { wearableSyncManager.pushDailyFocusGoal(it) }
-        }
-        viewModelScope.launch {
-            engine.focusIntervals.collect { interval ->
-                val task = activeFocusTaskSnapshot ?: selectedTask.value
-                repository.insertSessionIfAbsent(interval.toSessionLog(task))
-                wearableSyncManager.pushStateToWearable(force = true)
-                timerSnapshotStore.removePendingFocusInterval(interval.id)
-            }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            for (settings in timerSettingsUpdates) timerSettingsStore.write(settings)
-        }
-
-        viewModelScope.launch {
-            engine.transitionEvents.collect { transition ->
-                if (transition.cause == TimerTransitionCause.COMPLETED) {
-                    transitionNotifier.notify(transition, _timerSettings.value)
-                    if (transition.from == PomodoroState.FOCUS) recordFocusForSelectedTask()
+            combine(currentState, uiActive) { state, active -> state == PomodoroState.PANIC_MODE && active }
+                .distinctUntilChanged().collect { active ->
+                if (active) {
+                    registerStepSensor()
+                    startPhoneHaptics(application)
+                } else {
+                    unregisterStepSensor()
+                    stopPhoneHaptics(application)
                 }
             }
         }
-
         viewModelScope.launch {
-            combine(focusTasks, selectedTask) { tasks, selected -> tasks to selected }.collect { (tasks, selected) ->
-                if (selected != null && selected.id != _selectedTaskId.value) selectTask(selected.id)
-                val selectedIndex = tasks.indexOfFirst { it.id == selected?.id }
-                wearableSyncManager.pushTaskSummaries(
-                    selected?.title,
-                    tasks.getOrNull(selectedIndex + 1)?.title
-                )
-            }
-        }
-
-        restoredTimer?.transitions?.lastOrNull()?.let { transition ->
-            transitionNotifier.notify(transition, initialTimerSettings)
-        }
-
-        // Check for pending audits
-        viewModelScope.launch {
-            val pendingAudit = repository.getPendingAuditLog()
-            if (pendingAudit != null) {
-                _activeIncidentAudit.value = pendingAudit
-            }
-        }
-
-        // Synchronize state changes to wearable devices
-        viewModelScope.launch {
-            combine(currentState, secondsRemaining, isRunning) { _, _, _ -> }
-                .collect {
-                    wearableSyncManager.pushStateToWearable()
-                }
-        }
-
-        viewModelScope.launch {
-            var previousState = currentState.value
-            var previousRunning = false
-            combine(currentState, isRunning) { state, running -> state to running }.collect { (state, running) ->
-                if (state == PomodoroState.FOCUS && running && (previousState != PomodoroState.FOCUS || !previousRunning)) {
-                    activeFocusTaskSnapshot = selectedTask.value
-                }
-                previousState = state
-                previousRunning = running
-            }
-        }
-
-        viewModelScope.launch {
-            var lastState = PomodoroState.FOCUS
-
             currentState.collect { state ->
-                val now = System.currentTimeMillis()
                 if (domainProfiles.autoActivateDuringFocus()) {
                     val shouldEnable = state == PomodoroState.FOCUS
                     if (shouldEnable != _isDnsSinkholeActive.value && (!shouldEnable || VpnService.prepare(application) == null)) {
                         setDnsSinkholeEnabled(application, shouldEnable)
                     }
                 }
-                if (state == PomodoroState.PANIC_MODE) {
-                    // Triggered Panic Mode! Start recording steps
-                    _stepsTakenInPanic.value = 0
-                    initialStepCount = -1f
-                    registerStepSensor()
-
-                    // Inform the watch about immediate panic trigger message
-                    wearableSyncManager.sendPanicTriggerMessage()
-
-                    // Start Phone Haptics
-                    startPhoneHaptics(application)
-
-                    val incidentId = livePanicIncidentId ?: java.util.UUID.randomUUID().toString().also {
-                        check(panicRuntimePreferences.edit().putString("active_incident_id", it).commit())
-                        livePanicIncidentId = it
-                    }
-                    repository.insertIncidentIfAbsent(
-                        PanicLogEntity(
-                            incidentId = incidentId,
-                            timestamp = now,
-                            heartRateSpike = 138, // simulated heart rate spike triggering this
-                            stepsTaken = 0,
-                            resolvedAt = null,
-                            taskName = selectedTask.value?.title
-                        )
-                    )
-                } else if (lastState == PomodoroState.PANIC_MODE) {
-                    // Resolved Panic Mode! Unregister step sensor and save log
-                    unregisterStepSensor()
-                    stopPhoneHaptics(application)
-                    val resolvedIncidentId = livePanicIncidentId
-                    livePanicIncidentId = null
-                    viewModelScope.launch {
-                        val activePanic = resolvedIncidentId?.let { database.panicDao().getByIncidentId(it) }
-                        if (activePanic != null && IncidentStatus.canTransition(activePanic.incidentStatus, IncidentStatus.PENDING_DETAIL)) {
-                            val updatedPanic = activePanic.copy(
-                                stepsTaken = _stepsTakenInPanic.value,
-                                resolvedAt = now,
-                                incidentStatus = "PENDING_DETAIL"
-                            )
-                            repository.updatePanicLog(updatedPanic)
-                            _activeIncidentAudit.value = updatedPanic
-                        }
-                        if (panicRuntimePreferences.getString("active_incident_id", null) == resolvedIncidentId) {
-                            panicRuntimePreferences.edit().remove("active_incident_id").commit()
-                        }
-                    }
-                }
-
-                lastState = state
             }
         }
     }
 
-    fun startTimer() = engine.start()
-    fun pauseTimer() = engine.pause()
-    fun resetTimer() = engine.reset()
-    fun skipTimer() = engine.skip()
-
-    private fun FocusInterval.toSessionLog(task: FocusTaskEntity? = null) = SessionLogEntity(
-        sessionType = "FOCUS",
-        startTimeMillis = startTimeMillis,
-        durationSeconds = durationSeconds,
-        status = if (completed) "COMPLETED" else "INTERRUPTED",
-        taskId = task?.id,
-        taskName = task?.title,
-        timestamp = endTimeMillis,
-        recordId = id
-    )
+    fun startTimer() = runtime.command("START")
+    fun pauseTimer() = runtime.command("PAUSE")
+    fun resetTimer() = runtime.command("RESET")
+    fun skipTimer() = runtime.command("SKIP")
+    fun resolvePanicManually() = runtime.command("RESOLVE_PANIC")
+    fun setUiActive(active: Boolean) {
+        uiActive.value = active
+        if (!active) {
+            unregisterStepSensor()
+            stopPhoneHaptics(getApplication())
+            runtime.ensureForeground()
+        }
+    }
 
     fun setDailyTargetEnabled(enabled: Boolean) = updateFocusGoal(_focusGoalSettings.value.copy(enabled = enabled))
     fun setDailyTargetType(type: FocusTargetType) = updateFocusGoal(_focusGoalSettings.value.copy(type = type))
@@ -439,136 +216,80 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     fun setDailyResetHour(hour: Int) = updateFocusGoal(_focusGoalSettings.value.copy(resetHour = hour))
 
     private fun updateFocusGoal(settings: DailyFocusGoalSettings) {
-        val safe = settings.sanitized()
-        _focusGoalSettings.value = safe
-        goalClock.value = System.currentTimeMillis()
-        focusGoalUpdates.trySend(safe)
+        runtime.updateGoal(settings)
     }
 
     private fun refreshGoalClock() {
-        goalClock.value = System.currentTimeMillis()
-        val zoneId = java.util.TimeZone.getDefault().id
-        if (_focusGoalSettings.value.timeZoneId != zoneId) {
-            updateFocusGoal(_focusGoalSettings.value.copy(timeZoneId = zoneId))
-        }
+        runtime.refreshGoalClock()
     }
 
     fun setFocusDurationMinutes(minutes: Int) = updateTimerSetting(
-        _timerSettings.value.copy(focusDurationSeconds = minutes * 60),
+        { it.copy(focusDurationSeconds = minutes * 60) },
         resetTimer = true
     )
 
     fun setShortBreakDurationMinutes(minutes: Int) = updateTimerSetting(
-        _timerSettings.value.copy(shortBreakDurationSeconds = minutes * 60),
+        { it.copy(shortBreakDurationSeconds = minutes * 60) },
         resetTimer = true
     )
 
     fun setLongBreakDurationMinutes(minutes: Int) = updateTimerSetting(
-        _timerSettings.value.copy(longBreakDurationSeconds = minutes * 60),
+        { it.copy(longBreakDurationSeconds = minutes * 60) },
         resetTimer = true
     )
 
     fun setLongBreakCadence(cadence: Int) = updateTimerSetting(
-        _timerSettings.value.copy(longBreakCadence = cadence),
+        { it.copy(longBreakCadence = cadence) },
         resetTimer = false
     )
 
     fun setAutoStartBreaks(enabled: Boolean) = updateTimerSetting(
-        _timerSettings.value.copy(autoStartBreaks = enabled),
+        { it.copy(autoStartBreaks = enabled) },
         resetTimer = false
     )
 
     fun setAutoStartFocus(enabled: Boolean) = updateTimerSetting(
-        _timerSettings.value.copy(autoStartFocus = enabled),
+        { it.copy(autoStartFocus = enabled) },
         resetTimer = false
     )
 
     fun setTransitionSoundEnabled(enabled: Boolean) = updateTimerSetting(
-        _timerSettings.value.copy(transitionSoundEnabled = enabled),
+        { it.copy(transitionSoundEnabled = enabled) },
         resetTimer = false
     )
 
     fun setTransitionNotificationEnabled(enabled: Boolean) = updateTimerSetting(
-        _timerSettings.value.copy(transitionNotificationEnabled = enabled),
+        { it.copy(transitionNotificationEnabled = enabled) },
         resetTimer = false
     )
 
     fun setTransitionHapticEnabled(enabled: Boolean) = updateTimerSetting(
-        _timerSettings.value.copy(transitionHapticEnabled = enabled),
+        { it.copy(transitionHapticEnabled = enabled) },
         resetTimer = false
     )
 
-    private fun updateTimerSetting(settings: TimerSettings, resetTimer: Boolean) {
-        val sanitized = settings.sanitized()
-        _timerSettings.value = sanitized
-        engine.applySettings(sanitized, resetTimer)
-        timerSettingsUpdates.trySend(sanitized)
-        wearableSyncManager.pushStateToWearable(force = true)
+    private fun updateTimerSetting(settings: (TimerSettings) -> TimerSettings, resetTimer: Boolean) {
+        runtime.updateTimerSettings(settings, resetTimer)
     }
 
     fun setTimerState(state: PomodoroState) {
-        val duration = when (state) {
-            PomodoroState.FOCUS -> engine.focusDuration
-            PomodoroState.SHORT_BREAK -> engine.shortBreakDuration
-            PomodoroState.LONG_BREAK -> engine.longBreakDuration
-            PomodoroState.PANIC_MODE -> 60
-        }
-        engine.syncState(state, duration, false)
+        runtime.setPhase(state)
     }
 
-    fun addTask(title: String, estimateSessions: Int = 1) {
-        if (title.isBlank()) return
-        viewModelScope.launch {
-            val task = taskRepository.add(title, estimateSessions)
-            if (selectedTask.value == null) selectTask(task.id)
-        }
-    }
-
-    fun selectTask(id: String) {
-        _selectedTaskId.value = id
-        taskSelectionPreferences.edit().putString("selected_task_id", id).apply()
-    }
-
-    fun moveTask(id: String, offset: Int) = viewModelScope.launch { taskRepository.move(id, offset) }
-
-    fun completeTask(id: String) = viewModelScope.launch {
-        val wasSelected = selectedTask.value?.id == id
-        taskRepository.complete(id)
-        if (wasSelected) selectNextTask()
-    }
-
-    fun skipTask(id: String) = viewModelScope.launch {
-        val wasSelected = selectedTask.value?.id == id
-        taskRepository.skip(id)
-        if (wasSelected) selectNextTask()
-    }
-
-    fun deleteTask(id: String) = viewModelScope.launch {
-        val wasSelected = selectedTask.value?.id == id
-        taskRepository.delete(id)
-        if (wasSelected) selectNextTask()
-    }
-
-    private suspend fun recordFocusForSelectedTask() {
-        val id = selectedTask.value?.id ?: return
-        if (taskRepository.recordCompletedFocus(id)) selectNextTask()
-    }
-
-    private suspend fun selectNextTask() {
-        val next = taskRepository.pending().firstOrNull()
-        _selectedTaskId.value = next?.id
-        taskSelectionPreferences.edit().apply {
-            if (next == null) remove("selected_task_id") else putString("selected_task_id", next.id)
-        }.apply()
-    }
+    fun addTask(title: String, estimateSessions: Int = 1) = runtime.addTask(title, estimateSessions)
+    fun selectTask(id: String) = runtime.selectTask(id)
+    fun moveTask(id: String, offset: Int) = runtime.moveTask(id, offset)
+    fun completeTask(id: String) = runtime.completeTask(id)
+    fun skipTask(id: String) = runtime.skipTask(id)
+    fun deleteTask(id: String) = runtime.deleteTask(id)
 
     fun triggerPanic() {
-        engine.triggerPanic()
+        runtime.command("PANIC")
     }
 
     fun resolvePanic() {
-        if (currentState.value == PomodoroState.PANIC_MODE && _stepsTakenInPanic.value >= 50) {
-            engine.resolvePanic()
+        if (currentState.value == PomodoroState.PANIC_MODE && stepsTakenInPanic.value >= 50) {
+            runtime.command("RESOLVE_PANIC")
         }
     }
 
@@ -592,21 +313,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun markDistractionFromWear(incidentId: String) {
-        viewModelScope.launch {
-            if (database.panicDao().getByIncidentId(incidentId) != null) return@launch
-            val incident = PanicLogEntity(
-                incidentId = incidentId,
-                incidentType = "DISTRACTION",
-                sourceDevice = "WEAR",
-                incidentStatus = IncidentStatus.PENDING_DETAIL,
-                resolvedAt = System.currentTimeMillis(),
-                taskName = selectedTask.value?.title
-            )
-            if (repository.insertIncidentIfAbsent(incident) != -1L) {
-                _activeIncidentAudit.value = incident
-            }
-            wearableSyncManager.sendIncidentStatus(incidentId, IncidentStatus.PENDING_DETAIL)
-        }
+        runtime.markDistractionFromWear(incidentId)
     }
 
     /**
@@ -746,6 +453,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     fun resumePendingSync() {
         refreshGoalClock()
         wearableSyncManager.flushPendingSync()
+        runtime.scope.launch { runCatching { runtime.refresh() }.onFailure(runtime::reportError) }
     }
 
     fun exportBackup(uri: Uri, kind: BackupExportKind) = backupOperation {
@@ -795,7 +503,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     fun confirmBackupImport() = backupOperation {
         val document = preparedBackup ?: error("Select the backup again")
-        val result = backupRepository.restore(document)
+        val result = runtime.withSettingsRestore { backupRepository.restore(document) }
         preparedBackup = null
         _backupState.value = _backupState.value.copy(preview = null, settingsPending = result.settingsPending,
             message = "Merged ${result.sessionsAdded} sessions, ${result.incidentsAdded} incidents, ${result.tasksAdded} tasks." +
@@ -804,19 +512,12 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun retryBackupSettings() = backupOperation {
-        backupRepository.finishPendingSettings()
-        refreshRestoredSettings()
+        runtime.withSettingsRestore { backupRepository.finishPendingSettings() }
         _backupState.value = _backupState.value.copy(settingsPending = false, message = "Preferences restored; watch sync queued.")
     }
 
     private suspend fun refreshRestoredSettings() {
-        val timer = withContext(Dispatchers.IO) { timerSettingsStore.loadAndMigrate() }
-        _timerSettings.value = timer
-        engine.applySettings(timer, resetTimer = false)
-        _focusGoalSettings.value = withContext(Dispatchers.IO) { focusGoalStore.load() }
-        refreshGoalClock()
-        withContext(Dispatchers.IO) { wearableSyncManager.refreshRestoredWatchFaceSettings() }
-        wearableSyncManager.pushStateToWearable(force = true)
+        runtime.reloadSettings()
     }
 
     private fun backupOperation(block: suspend () -> Unit) = viewModelScope.launch {
@@ -826,7 +527,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             if (error is CancellationException) throw error
             _backupState.value = _backupState.value.copy(message = error.message ?: "The operation could not be completed")
             Log.e("PomodoroViewModel", "Local backup operation failed", error)
-        } finally { _backupState.value = _backupState.value.copy(busy = false) }
+        } finally { _backupState.value = _backupState.value.copy(busy = false, settingsPending = runtime.settingsPending.value) }
     }
 
     suspend fun deleteLocalData(target: String): String = withContext(Dispatchers.IO) {
@@ -841,14 +542,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             "pending sync operations" -> database.syncOutboxDao().clearAll()
             "timer and daily target preferences" -> {
                 check(database.restoreSettingsDao().pending() == null) { "Finish the pending settings restore before resetting preferences" }
-                timerSettingsStore.write(TimerSettings())
-                focusGoalStore.save(DailyFocusGoalSettings())
-                withContext(Dispatchers.Main) {
-                    _timerSettings.value = timerSettingsStore.loadAndMigrate()
-                    engine.applySettings(_timerSettings.value, resetTimer = false)
-                    _focusGoalSettings.value = focusGoalStore.load()
-                    refreshGoalClock()
-                    wearableSyncManager.pushStateToWearable(force = true)
+                runtime.withSettingsRestore {
+                    timerSettingsStore.write(TimerSettings())
+                    focusGoalStore.save(DailyFocusGoalSettings())
                 }
             }
             "watch face preferences" -> wearableSyncManager.clearWatchFacePreferences()
@@ -914,7 +610,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     // Support step simulation for manual trigger and easy testing
     fun incrementStepsSimulated() {
         if (currentState.value == PomodoroState.PANIC_MODE) {
-            _stepsTakenInPanic.value += 5
+            runtime.setSteps(stepsTakenInPanic.value + 5)
         }
     }
 
@@ -923,16 +619,14 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setSteps(steps: Int) {
-        if (steps > _stepsTakenInPanic.value) {
-            _stepsTakenInPanic.value = steps
-        }
+        runtime.setSteps(steps)
     }
 
     // Adaptive Timers based on Biometrics
     fun receiveBiometricStressSignal() {
         if (currentState.value == PomodoroState.FOCUS) {
             // High HR detected, proactively reduce remaining focus time by 5 minutes
-            engine.reduceTime(5 * 60)
+            runtime.reduceTime(5 * 60)
         }
     }
 
@@ -968,8 +662,11 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun registerStepSensor() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(getApplication(), android.Manifest.permission.ACTIVITY_RECOGNITION) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
         stepDetectorSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+            runCatching { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+                .onFailure { error -> Log.e("PomodoroViewModel", "Step sensor unavailable", error) }
         }
     }
 
@@ -981,7 +678,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         if (currentState.value != PomodoroState.PANIC_MODE) return
         event?.let {
             if (it.sensor.type == Sensor.TYPE_STEP_DETECTOR) {
-                _stepsTakenInPanic.value += 1
+                runtime.setSteps(stepsTakenInPanic.value + 1)
             }
         }
     }
@@ -990,8 +687,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         super.onCleared()
-        getApplication<Application>().unregisterReceiver(goalTimeReceiver)
         unregisterStepSensor()
-        wearableSyncManager.unregisterListeners()
+        stopPhoneHaptics(getApplication())
     }
 }

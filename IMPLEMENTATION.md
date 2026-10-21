@@ -256,7 +256,9 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   bottom-right slot modes use the same snapshot. Disabled or expired targets
   return no complication data, and complication validity ends at daily reset.
 - Automated logic, storage, phone interaction/render, and Wear receive tests pass.
-  Physical device and watch-face refresh verification is pending connection.
+  On 2026-10-21, Pixel 9 and Pixel Watch 3 (both API 37) agreed on a QA session
+  goal of 1/3, including its period and timezone. Visible watch-page and
+  watch-face refresh verification remain pending.
 
 ### Useful Insights (Roadmap Item 8)
 
@@ -271,9 +273,9 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   20-record limit. Static retro tiles no longer have no-op click actions.
 - No schema or timer-state changes are required. Host tests cover fixed
   timestamps, partial data, DST, picker search/selection, and 10,000 records.
-  `InsightsInteractionTest` compiles in CI but requires a connected Android
-  device for native dialog-window interactions. Physical scrolling, TalkBack,
-  and date-picker verification remain pending.
+  Pixel 9 API 37 passed native picker/filter integration, empty/incident-only
+  states, and 10,000-record navigation/search on 2026-10-21. Last-row navigation
+  took 120 ms. TalkBack remains pending; see `docs/INSIGHTS.md`.
 
 ### Backup and Export (Roadmap Item 9)
 
@@ -288,6 +290,37 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   export is user initiated. `docs/BACKUP.md` documents the scope and CSV headers.
 - Host tests cover validation, round trips, deduplication, rollback, journal
   replay, policy, and rendering. Native provider/device checks remain pending.
+
+### Quick Settings Timer (Roadmap Item 10)
+
+- `TimerRuntime.kt` owns one application-scoped engine, synchronization manager,
+  timer/goal settings, snapshots, task selection, and focus accounting. The
+  ViewModel delegates these responsibilities without extending sensor or phone
+  panic-haptic registration beyond the visible Activity.
+- `PomodoroTileService.kt` shows the live phase, start/pause action, and remaining
+  minutes. Locked taps open controls without queuing a mutation; a fresh action
+  after unlock is required. It exposes unavailable loading,
+  pending-restore, and panic states. The system secondary action opens the phone
+  controls through `QS_TILE_PREFERENCES`.
+- `TimerForegroundService.kt` is a private, user-started `specialUse` host with
+  an ongoing notification. Its restart attaches to the persisted timer instead
+  of replaying a toggle. Foreground-start failures produce an error rather than
+  silently leaving a new timer running.
+- The Wear listener copies callbacks into the same runtime; the old Activity
+  control broadcast and duplicate live listeners are removed. Applied command
+  IDs commit with timer state, and failed writes restore the last committed
+  snapshot. Interrupted reconciliation and restore cleanup finish safely.
+- Monotonic catch-up records every completed focus interval, advances task
+  selection between automated sessions, and emits only the latest recovered
+  transition alert. Tile refreshes are coalesced at phase/running/minute changes.
+- The full host gate passed 136 tests and all three APK builds. On Pixel 9 API 37,
+  both QA lifecycle tests passed, including a real 60-second completion with the
+  Activity closed, one history record, a running break, and its notification.
+  A cold tile start recreated the phone process; a Pixel Watch 3 pause updated
+  the tile and persisted the command. The user's lock/cancel/normal-unlock check
+  left the corrected timer and revision unchanged; fresh unlocked controls
+  passed afterward. See `docs/QUICK_SETTINGS.md` for remaining
+  physical checks and foreground-service policy limits.
 
 When working on this project, verify and build on top of these files:
 

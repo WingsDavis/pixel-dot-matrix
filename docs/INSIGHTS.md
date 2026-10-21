@@ -79,5 +79,11 @@ With a phone connected, run:
 
 The 10,000-record calculation has a generous 2-second regression ceiling to
 accommodate CI variance; this is not a physical-device frame-time benchmark.
-On-device scrolling, native task/category/date-picker interaction, and TalkBack
-still require a connected phone check before item 8 is marked fully verified.
+
+On 2026-10-21, the isolated QA build passed `InsightsInteractionTest` and both
+`InsightsDatasetInteractionTest` cases on a Pixel 9 running API 37. Native date,
+task, and category pickers, weekly/reset controls, empty and incident-only data,
+and 10,000-row navigation/search passed. Jumping to the last history row took
+120 ms, including the test's idle synchronization. This is a navigation check,
+not a sustained frame-time or TalkBack benchmark. TalkBack remains unverified.
+The fixture tests do not write history to the normal app.

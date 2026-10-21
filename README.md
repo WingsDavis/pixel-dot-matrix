@@ -15,6 +15,7 @@ Wear OS app, and a Watch Face Format (WFF) watch face.
 - Local incident capture and optional DNS protection
 - Optional daily focus targets in minutes or completed sessions
 - Versioned local JSON backup/import and analysis-friendly CSV export
+- Android Quick Settings start/pause tile backed by the shared phone timer
 - Local-first storage with granular data deletion controls
 
 ## Modules
@@ -78,6 +79,7 @@ flowchart LR
 See [Architecture](docs/ARCHITECTURE.md),
 [Insights Metrics](docs/INSIGHTS.md),
 [Backup and Export](docs/BACKUP.md),
+[Quick Settings Timer](docs/QUICK_SETTINGS.md),
 [Implementation Guide](IMPLEMENTATION.md), and
 [Feature Roadmap](FEATURE_ROADMAP.md) for detailed design and progress.
 

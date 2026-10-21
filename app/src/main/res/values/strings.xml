@@ -1,3 +1,7 @@
 <resources>
+    <string name="timer_tile_label">Focus timer</string>
+    <string name="timer_tile_loading">Loading timer</string>
+    <string name="timer_tile_failed">Timer operation failed. Open the app to retry.</string>
+    <string name="timer_service_channel">Running focus timer</string>
     <string name="app_name">Pixel Dot Matrix</string>
 </resources>

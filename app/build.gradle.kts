@@ -36,7 +36,9 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { }
+    debug {
+      if (providers.gradleProperty("isolatedQa").orNull == "true") applicationIdSuffix = ".qa"
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11

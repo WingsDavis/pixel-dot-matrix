@@ -1,14 +1,23 @@
 package com.example.core.sync
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.example.core.timer.PomodoroState
 import com.example.core.timer.FocusInterval
 import org.json.JSONObject
+import org.json.JSONArray
 
-class TimerSnapshotStore(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+class TimerSnapshotStore(private val preferences: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE))
+    private var committedSnapshot = readSnapshot()
+    private var committedCommands = readCommands()
+    private val committedPending = preferences.all.entries.filter { it.key.startsWith(PENDING_FOCUS_PREFIX) }
+        .mapNotNull { (it.value as? String)?.let(::decodeInterval) }.associateBy { it.id }.toMutableMap()
 
-    fun load(): TimerSnapshot? {
+    @Synchronized
+    fun load(): TimerSnapshot? = committedSnapshot
+
+    private fun readSnapshot(): TimerSnapshot? {
         if (!preferences.contains(KEY_REVISION)) return null
         val state = runCatching {
             PomodoroState.valueOf(preferences.getString(KEY_STATE, null) ?: return null)
@@ -32,8 +41,27 @@ class TimerSnapshotStore(context: Context) {
         )
     }
 
-    fun save(snapshot: TimerSnapshot) {
-        val persisted = preferences.edit()
+    @Synchronized
+    fun save(snapshot: TimerSnapshot, commandId: String? = null) {
+        val ids = if (commandId == null) committedCommands else committedCommands.filterNot { it == commandId }.takeLast(255) + commandId
+        try {
+            check(writeSnapshot(preferences.edit(), snapshot, ids).commit()) { "Unable to persist timer snapshot" }
+        } catch (error: Exception) {
+            // commit() updates SharedPreferences memory even when its disk write fails.
+            runCatching { writeSnapshot(preferences.edit(), committedSnapshot, committedCommands).commit() }
+            throw error
+        }
+        committedSnapshot = snapshot
+        committedCommands = ids
+    }
+
+    private fun writeSnapshot(editor: SharedPreferences.Editor, snapshot: TimerSnapshot?, ids: List<String>): SharedPreferences.Editor {
+        editor.putString(KEY_APPLIED_COMMANDS, JSONArray(ids).toString())
+        if (snapshot == null) {
+            SNAPSHOT_KEYS.forEach { editor.remove(it) }
+            return editor
+        }
+        return editor
             .putLong(KEY_REVISION, snapshot.revision)
             .putString(KEY_SESSION_ID, snapshot.sessionId)
             .putString(KEY_SOURCE_NODE, snapshot.sourceDevice)
@@ -46,22 +74,37 @@ class TimerSnapshotStore(context: Context) {
             .putLong(KEY_LEASE_EXPIRES_AT, snapshot.leaseExpiresAtEpochMs)
             .putInt(KEY_COMPLETED_FOCUS_SESSIONS, snapshot.completedFocusSessions)
             .putString(KEY_ACTIVE_FOCUS, snapshot.activeFocusInterval?.let(::encodeInterval))
-            .commit()
-        check(persisted) { "Unable to persist timer snapshot" }
     }
 
+    @Synchronized
+    fun wasCommandApplied(id: String): Boolean = id in committedCommands
+
+    private fun readCommands(): List<String> {
+        val values = JSONArray(preferences.getString(KEY_APPLIED_COMMANDS, "[]"))
+        return List(values.length()) { values.getString(it) }
+    }
+
+    @Synchronized
     fun savePendingFocusInterval(interval: FocusInterval) {
-        check(preferences.edit().putString(PENDING_FOCUS_PREFIX + interval.id, encodeInterval(interval)).commit()) {
-            "Unable to persist focus accounting"
+        val key = PENDING_FOCUS_PREFIX + interval.id
+        if (!preferences.edit().putString(key, encodeInterval(interval)).commit()) {
+            preferences.edit().putString(key, committedPending[interval.id]?.let(::encodeInterval)).commit()
+            error("Unable to persist focus accounting")
         }
+        committedPending[interval.id] = interval
     }
 
-    fun pendingFocusIntervals(): List<FocusInterval> = preferences.all.entries
-        .filter { it.key.startsWith(PENDING_FOCUS_PREFIX) }
-        .mapNotNull { (it.value as? String)?.let(::decodeInterval) }
+    @Synchronized
+    fun pendingFocusIntervals(): List<FocusInterval> = committedPending.values.toList()
 
+    @Synchronized
     fun removePendingFocusInterval(id: String) {
-        preferences.edit().remove(PENDING_FOCUS_PREFIX + id).commit()
+        val key = PENDING_FOCUS_PREFIX + id
+        if (!preferences.edit().remove(key).commit()) {
+            preferences.edit().putString(key, committedPending[id]?.let(::encodeInterval)).commit()
+            error("Unable to acknowledge focus accounting")
+        }
+        committedPending.remove(id)
     }
 
     private fun encodeInterval(interval: FocusInterval): String = JSONObject().apply {
@@ -90,7 +133,11 @@ class TimerSnapshotStore(context: Context) {
         private const val KEY_LEASE_EXPIRES_AT = "lease_expires_at"
         private const val KEY_COMPLETED_FOCUS_SESSIONS = "completed_focus_sessions"
         private const val KEY_ACTIVE_FOCUS = "active_focus_interval"
+        private const val KEY_APPLIED_COMMANDS = "applied_commands"
         private const val PENDING_FOCUS_PREFIX = "pending_focus_"
         private const val SOURCE_PHONE = "phone"
+        private val SNAPSHOT_KEYS = listOf(KEY_REVISION, KEY_SESSION_ID, KEY_SOURCE_NODE, KEY_AUTHORITY, KEY_STATE,
+            KEY_SECONDS_REMAINING, KEY_IS_RUNNING, KEY_UPDATED_AT, KEY_ANCHOR, KEY_LEASE_EXPIRES_AT,
+            KEY_COMPLETED_FOCUS_SESSIONS, KEY_ACTIVE_FOCUS)
     }
 }
