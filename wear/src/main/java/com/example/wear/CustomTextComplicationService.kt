@@ -1,7 +1,9 @@
 package com.example.wear
 
 import androidx.wear.watchface.complications.data.ComplicationData
+import androidx.wear.watchface.complications.data.ComplicationText
 import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.NoDataComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
 import androidx.wear.watchface.complications.data.LongTextComplicationData
@@ -25,40 +27,72 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
     }
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
+        if (request.complicationType != ComplicationType.SHORT_TEXT &&
+            request.complicationType != ComplicationType.LONG_TEXT
+        ) return null
+
+        val now = System.currentTimeMillis()
         val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
         val configPrefs = getSharedPreferences("watchface_config_prefs", Context.MODE_PRIVATE)
-        val state = prefs.getString("state", "FOCUS") ?: "FOCUS"
+        val timer = WearComplicationState.read(this, now)
         val customText = configPrefs.getString("custom_text", prefs.getString("custom_text", null)).orEmpty()
         val leftSlotMode = configPrefs.getString("left_slot_mode", "custom_text") ?: "custom_text"
-        val hr = prefs.getInt("current_hr", 74)
-        val isRunning = prefs.getBoolean("is_running", false)
-        val isActive = isRunning || state == "PANIC_MODE"
-        val dailyGoal = if (leftSlotMode == "daily_target") WearDailyFocusGoal.read(this) else null
+        val nextPhase = if (timer.state == "FOCUS") "BREAK" else "FOCUS"
+        val isActive = timer.isRunning || timer.state == "PANIC_MODE"
+        val dailyGoal = if (leftSlotMode == "daily_target") WearDailyFocusGoal.read(this, now) else null
+        val heartRateAt = if (leftSlotMode == "heart_rate") prefs.getLong("current_hr_at", 0L) else 0L
+        val heartRate = if (heartRateAt in 1L..now && now - heartRateAt < 300_000L) {
+            prefs.getInt("current_hr", 0).takeIf { it > 0 }
+        } else null
 
-        val displayStr: String? = when {
+        val displayText: ComplicationText? = when {
             leftSlotMode == "hidden" -> null
             isActive && leftSlotMode == "custom_text" -> null
-            leftSlotMode == "custom_text" -> customText.ifBlank { null }
-            leftSlotMode == "phase" -> state.toDisplayText()
-            leftSlotMode == "heart_rate" -> "$hr BPM"
-            leftSlotMode == "next_break" -> state.toNextBreakText()
-            leftSlotMode == "streak" -> "STREAK 0"
-            leftSlotMode == "daily_target" -> dailyGoal?.shortText
-            else -> customText.ifBlank { null }
+            leftSlotMode == "custom_text" -> customText.ifBlank { null }?.let { PlainComplicationText.Builder(it).build() }
+            leftSlotMode == "phase" -> PlainComplicationText.Builder(timer.state.toDisplayText()).build()
+            leftSlotMode == "heart_rate" -> heartRate?.let { PlainComplicationText.Builder("$it BPM").build() }
+            leftSlotMode == "next_break" -> if (timer.state == "PANIC_MODE") {
+                PlainComplicationText.Builder("RECOVER").build()
+            } else timer.countdownText(
+                if (request.complicationType == ComplicationType.LONG_TEXT) "$nextPhase IN ^1" else "${nextPhase.first()} ^1"
+            )
+            leftSlotMode == "daily_target" -> dailyGoal?.let { PlainComplicationText.Builder(it.shortText).build() }
+            else -> null
         }
 
-        if (displayStr == null) {
-            return androidx.wear.watchface.complications.data.NoDataComplicationData()
+        if (displayText == null) return NoDataComplicationData()
+        val title = if (leftSlotMode == "next_break" && timer.state != "PANIC_MODE") {
+            PlainComplicationText.Builder(if (timer.isRunning) nextPhase else "PAUSED").build()
+        } else null
+        val description = if (leftSlotMode == "next_break" && timer.state != "PANIC_MODE") {
+            timer.countdownText("${if (timer.isRunning) "" else "Paused. "}$nextPhase IN ^1")
+        } else displayText
+        val tap = when {
+            leftSlotMode == "daily_target" -> ComplicationActions.openDailyTarget(this)
+            timer.state == "PANIC_MODE" -> ComplicationActions.openPanic(this)
+            else -> ComplicationActions.openTimer(this)
         }
-
-        val text = PlainComplicationText.Builder(displayStr).build()
+        val validity = when {
+            dailyGoal != null -> TimeRange.between(
+                Instant.ofEpochMilli(dailyGoal.day.startEpochMs), Instant.ofEpochMilli(dailyGoal.day.endEpochMs - 1)
+            )
+            leftSlotMode == "heart_rate" -> TimeRange.between(
+                Instant.ofEpochMilli(heartRateAt),
+                Instant.ofEpochMilli(heartRateAt.coerceAtMost(Long.MAX_VALUE - 299_999L) + 299_999L)
+            )
+            else -> null
+        }
 
         return when (request.complicationType) {
-            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(text, text).apply {
-                dailyGoal?.let { setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(it.day.startEpochMs), Instant.ofEpochMilli(it.day.endEpochMs))) }
+            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(displayText, description).apply {
+                setTapAction(tap)
+                title?.let { setTitle(it) }
+                validity?.let { setValidTimeRange(it) }
             }.build()
-            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(text, text).apply {
-                dailyGoal?.let { setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(it.day.startEpochMs), Instant.ofEpochMilli(it.day.endEpochMs))) }
+            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(displayText, description).apply {
+                setTapAction(tap)
+                title?.let { setTitle(it) }
+                validity?.let { setValidTimeRange(it) }
             }.build()
             else -> null
         }
@@ -71,15 +105,6 @@ class CustomTextComplicationService : SuspendingComplicationDataSourceService() 
             "LONG_BREAK" -> "LONG BREAK"
             "PANIC_MODE" -> "PANIC"
             else -> this
-        }
-    }
-
-    private fun String.toNextBreakText(): String {
-        return when (this) {
-            "FOCUS" -> "NEXT BREAK"
-            "SHORT_BREAK", "LONG_BREAK" -> "NEXT FOCUS"
-            "PANIC_MODE" -> "RECOVER"
-            else -> "NEXT BREAK"
         }
     }
 

@@ -80,6 +80,7 @@ See [Architecture](docs/ARCHITECTURE.md),
 [Insights Metrics](docs/INSIGHTS.md),
 [Backup and Export](docs/BACKUP.md),
 [Quick Settings Timer](docs/QUICK_SETTINGS.md),
+[Complications](docs/COMPLICATIONS.md),
 [Implementation Guide](IMPLEMENTATION.md), and
 [Feature Roadmap](FEATURE_ROADMAP.md) for detailed design and progress.
 

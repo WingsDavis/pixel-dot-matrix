@@ -322,6 +322,27 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   passed afterward. See `docs/QUICK_SETTINGS.md` for remaining
   physical checks and foreground-service policy limits.
 
+### Actionable Complications (Roadmap Item 11)
+
+- All five owned providers guard advertised preview/runtime types and attach
+  immutable navigation-only tap actions. Daily targets open their dedicated
+  page; panic/logo content opens panic controls without sending a second command.
+  The old `panic://trigger` entry point follows the same safe navigation policy.
+- `WearComplicationState.kt` reads persisted timer anchors without network access
+  or writes. Time-dependent text handles date/countdown display; API 33+ ranged
+  progress uses a bounded platform-clock expression with an older-system static
+  fallback. Idle retains -1 and range maxima retain the phase duration.
+- Missing/stale sensor values, unavailable battery readings, and unsupported
+  content return no data. Heart-rate samples require timestamps and expire after
+  five minutes. Daily-target validity excludes its next reset instant.
+- `ComplicationUpdates.kt` coalesces repeated callbacks and refreshes all relevant
+  slots after timer, goal, config, text, or logo changes. It includes bottom-right
+  and daily-target providers and does not push an update on every second tick.
+  The system fallback period is 300 seconds, except for push-only logo content.
+- The watch is unavailable for this pass. Host tests and build results are
+  recorded in `docs/COMPLICATIONS.md`; on-device binding, rendering, and tap
+  verification remain pending rather than being inferred from compilation.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

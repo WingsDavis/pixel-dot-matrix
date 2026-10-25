@@ -63,7 +63,7 @@
         <service
             android:name="com.example.wear.CustomTextComplicationService"
             android:exported="true"
-            android:icon="@android:mipmap/sym_def_app_icon"
+            android:icon="@drawable/ic_complication"
             android:label="Custom Text"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
@@ -74,13 +74,13 @@
                 android:value="SHORT_TEXT,LONG_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="0" />
+                android:value="300" />
         </service>
 
         <service
             android:name="com.example.wear.PomodoroProgressComplicationService"
             android:exported="true"
-            android:icon="@android:mipmap/sym_def_app_icon"
+            android:icon="@drawable/ic_complication"
             android:label="Pixel Dot Matrix Progress"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
@@ -91,13 +91,13 @@
                 android:value="RANGED_VALUE" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="0" />
+                android:value="300" />
         </service>
 
         <service
             android:name="com.example.wear.BottomRightComplicationService"
             android:exported="true"
-            android:icon="@android:mipmap/sym_def_app_icon"
+            android:icon="@drawable/ic_complication"
             android:label="Pomodoro Face Status"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
@@ -108,13 +108,13 @@
                 android:value="SHORT_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="0" />
+                android:value="300" />
         </service>
 
         <service
             android:name="com.example.wear.LogoComplicationService"
             android:exported="true"
-            android:icon="@android:mipmap/sym_def_app_icon"
+            android:icon="@drawable/ic_complication"
             android:label="Pomodoro Logo"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
@@ -131,7 +131,7 @@
         <service
             android:name="com.example.wear.DailyTargetComplicationService"
             android:exported="true"
-            android:icon="@android:mipmap/sym_def_app_icon"
+            android:icon="@drawable/ic_complication"
             android:label="Pixel Dot Matrix Daily Target"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
@@ -142,7 +142,7 @@
                 android:value="SHORT_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="0" />
+                android:value="300" />
         </service>
 
     </application>

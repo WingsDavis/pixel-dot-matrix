@@ -31,54 +31,10 @@ class WearSyncService : WearableListenerService() {
                         prefs.edit().putString("style_id", styleId).apply()
                     }
                 } else if (item.uri.path == "/pomodoro/state") {
-                    val dataMap = DataMapItem.fromDataItem(item).dataMap
-                    val state = dataMap.getString("state") ?: "FOCUS"
-                    val secondsRemaining = dataMap.getInt("seconds_remaining")
-                    val isRunning = dataMap.getBoolean("is_running")
-                    val timerRevision = dataMap.getLong("timer_revision", -1L)
-                    val sourceDevice = dataMap.getString("source_device") ?: "phone"
-                    val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
-
-                    val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
-                    prefs.edit()
-                        .putString("state", state)
-                        .putInt("seconds_remaining", secondsRemaining)
-                        .putBoolean("is_running", isRunning)
-                        .putLong("timer_revision", timerRevision)
-                        .putString("session_id", dataMap.getString("session_id"))
-                        .putLong("timer_updated_at", updatedAt)
-                        .putLong("wear_lease_expires_at", dataMap.getLong("lease_expires_at", 0L))
-                        .putBoolean("wear_authority", sourceDevice == "wear" && dataMap.getString("authority") == "WEAR")
-                        .putInt("focus_duration", dataMap.getInt("focus_duration", prefs.getInt("focus_duration", 1500)))
-                        .putInt("short_break_duration", dataMap.getInt("short_break_duration", prefs.getInt("short_break_duration", 300)))
-                        .putInt("long_break_duration", dataMap.getInt("long_break_duration", prefs.getInt("long_break_duration", 900)))
-                        .putInt("long_break_cadence", dataMap.getInt("long_break_cadence", prefs.getInt("long_break_cadence", 4)))
-                        .putInt("completed_focus_sessions", dataMap.getInt("completed_focus_sessions", prefs.getInt("completed_focus_sessions", 0)))
-                        .putBoolean("auto_start_breaks", dataMap.getBoolean("auto_start_breaks", prefs.getBoolean("auto_start_breaks", false)))
-                        .putBoolean("auto_start_focus", dataMap.getBoolean("auto_start_focus", prefs.getBoolean("auto_start_focus", false)))
-                        .apply()
-
-                    // Request complication update for both progress and custom text
-                    val componentName = android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)
-                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-                        .create(applicationContext, componentName)
-                        .requestUpdateAll()
-
-                    val customComponentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
-                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-                        .create(applicationContext, customComponentName)
-                        .requestUpdateAll()
+                    applyTimerState(DataMapItem.fromDataItem(item).dataMap)
                 } else if (item.uri.path == WearDailyFocusGoal.PATH) {
                     if (WearDailyFocusGoal.save(this, DataMapItem.fromDataItem(item).dataMap)) {
-                        listOf(
-                            DailyTargetComplicationService::class.java,
-                            CustomTextComplicationService::class.java,
-                            BottomRightComplicationService::class.java
-                        ).forEach { provider ->
-                            androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-                                .create(this, android.content.ComponentName(this, provider))
-                                .requestUpdateAll()
-                        }
+                        ComplicationUpdates.goal(this)
                     }
                 } else if (item.uri.path == "/pomodoro/tasks") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
@@ -102,6 +58,36 @@ class WearSyncService : WearableListenerService() {
                 }
             }
         }
+    }
+
+    internal fun applyTimerState(data: com.google.android.gms.wearable.DataMap): Boolean {
+        val state = data.getString("state") ?: "FOCUS"
+        if (state !in setOf("FOCUS", "SHORT_BREAK", "LONG_BREAK", "PANIC_MODE")) return false
+        val prefs = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE)
+        synchronized(prefs) {
+            val revision = data.getLong("timer_revision", -1L)
+            if (revision < prefs.getLong("timer_revision", -1L)) return false
+            val source = data.getString("source_device") ?: "phone"
+            prefs.edit()
+                .putString("state", state)
+                .putInt("seconds_remaining", data.getInt("seconds_remaining").coerceIn(0, 86_400))
+                .putBoolean("is_running", data.getBoolean("is_running"))
+                .putLong("timer_revision", revision)
+                .putString("session_id", data.getString("session_id"))
+                .putLong("timer_updated_at", data.getLong("timestamp", System.currentTimeMillis()).coerceAtLeast(0L))
+                .putLong("wear_lease_expires_at", data.getLong("lease_expires_at", 0L))
+                .putBoolean("wear_authority", source == "wear" && data.getString("authority") == "WEAR")
+                .putInt("focus_duration", data.getInt("focus_duration", prefs.getInt("focus_duration", 1500)))
+                .putInt("short_break_duration", data.getInt("short_break_duration", prefs.getInt("short_break_duration", 300)))
+                .putInt("long_break_duration", data.getInt("long_break_duration", prefs.getInt("long_break_duration", 900)))
+                .putInt("long_break_cadence", data.getInt("long_break_cadence", prefs.getInt("long_break_cadence", 4)))
+                .putInt("completed_focus_sessions", data.getInt("completed_focus_sessions", prefs.getInt("completed_focus_sessions", 0)))
+                .putBoolean("auto_start_breaks", data.getBoolean("auto_start_breaks", prefs.getBoolean("auto_start_breaks", false)))
+                .putBoolean("auto_start_focus", data.getBoolean("auto_start_focus", prefs.getBoolean("auto_start_focus", false)))
+                .apply()
+        }
+        ComplicationUpdates.timer(this)
+        return true
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
@@ -135,10 +121,7 @@ class WearSyncService : WearableListenerService() {
                         .edit()
                         .putString("custom_text", customText)
                         .commit()
-                    val componentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
-                    androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-                        .create(applicationContext, componentName)
-                        .requestUpdateAll()
+                    ComplicationUpdates.text(this)
                 }
                 "/panic/trigger" -> if (!shouldSkipLaunch(lastPanicLaunchElapsed)) {
                     lastPanicLaunchElapsed = SystemClock.elapsedRealtime()
@@ -207,22 +190,7 @@ class WearSyncService : WearableListenerService() {
     private data class SyncEnvelope(val id: String, val payload: ByteArray)
 
     private fun requestOwnedComplicationUpdates() {
-        val progressComponent = android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)
-        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-            .create(applicationContext, progressComponent)
-            .requestUpdateAll()
-
-        val customComponent = android.content.ComponentName(this, CustomTextComplicationService::class.java)
-        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-            .create(applicationContext, customComponent)
-            .requestUpdateAll()
-
-        val bottomRightComponent = android.content.ComponentName(this, BottomRightComplicationService::class.java)
-        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-            .create(applicationContext, bottomRightComponent)
-            .requestUpdateAll()
-
-        requestLogoComplicationUpdate()
+        ComplicationUpdates.config(this)
     }
 
     private fun storeLogoAsset(asset: Asset) {
@@ -243,10 +211,7 @@ class WearSyncService : WearableListenerService() {
     }
 
     private fun requestLogoComplicationUpdate() {
-        val component = android.content.ComponentName(this, LogoComplicationService::class.java)
-        androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
-            .create(applicationContext, component)
-            .requestUpdateAll()
+        ComplicationUpdates.logo(this)
     }
 
     private fun applyWatchFaceConfig(dataMap: com.google.android.gms.wearable.DataMap) {

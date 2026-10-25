@@ -1,6 +1,5 @@
 package com.example.wear
 
-import android.content.Context
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.PlainComplicationText
@@ -16,7 +15,7 @@ class DailyTargetComplicationService : SuspendingComplicationDataSourceService()
         if (type != ComplicationType.SHORT_TEXT) return null
         val text = PlainComplicationText.Builder("45/120m").build()
         return ShortTextComplicationData.Builder(text, PlainComplicationText.Builder("Daily focus target").build())
-            .setTapAction(ComplicationActions.openTimer(this)).build()
+            .setTapAction(ComplicationActions.openDailyTarget(this)).build()
     }
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
@@ -25,8 +24,8 @@ class DailyTargetComplicationService : SuspendingComplicationDataSourceService()
         return ShortTextComplicationData.Builder(
             PlainComplicationText.Builder(progress.shortText).build(),
             PlainComplicationText.Builder("Daily focus target").build()
-        ).setTapAction(ComplicationActions.openTimer(this))
-            .setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(progress.day.startEpochMs), Instant.ofEpochMilli(progress.day.endEpochMs)))
+        ).setTapAction(ComplicationActions.openDailyTarget(this))
+            .setValidTimeRange(TimeRange.between(Instant.ofEpochMilli(progress.day.startEpochMs), Instant.ofEpochMilli(progress.day.endEpochMs - 1)))
             .build()
     }
 }

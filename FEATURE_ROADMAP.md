@@ -1,6 +1,6 @@
 # Pixel Dot Matrix Feature Roadmap
 
-Last updated: 2026-10-21
+Last updated: 2026-10-25
 
 This roadmap tracks the 20 planned product improvements across the mobile app,
 Wear app, Watch Face Format bundle, synchronization layer, and local data model.
@@ -294,10 +294,30 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Keep third-party provider selection owned by the Pixel Watch editor.
 
 **Acceptance criteria**
-- [ ] Providers return valid preview and runtime data for every declared type.
+- [x] Providers return valid preview and runtime data for every declared type.
 - [ ] Taps work from interactive mode without duplicate commands.
-- [ ] Missing phone connectivity produces useful standalone data.
-- [ ] Provider updates are requested after every relevant state change.
+- [x] Missing phone connectivity produces useful standalone data.
+- [x] Provider updates are requested after every relevant state change.
+
+**Implementation and verification**
+- Runtime and preview data validate the advertised types. App-owned taps only
+  navigate to the active timer, daily target, or panic controls. The legacy logo
+  link now opens panic controls rather than sending a second command.
+- Time-dependent text keeps date/countdown content current without polling.
+  Modern ranged progress uses a bounded platform-clock expression; older Wear
+  versions retain a bounded static fallback. Missing or stale measurements are
+  not replaced with invented heart rate, streak, or battery values.
+- Shared refresh routing covers progress, custom text, bottom-right, target, and
+  logo providers, coalesces identical callbacks, and avoids per-second pushes.
+  Fallback provider refresh is 300 seconds; logo changes are push-driven.
+- The phone gate passed 133 tests, compiled instrumentation, and built phone and
+  WFF APKs. All 39 Wear tests and the Wear APK build pass, including native image
+  decoding, stale/duplicate snapshots, restored phase persistence, expiry,
+  canceled navigation, and same-BPM sample freshness.
+- The watch is not connected, so physical interactive taps, provider binding,
+  and actual watch rendering remain pending. The user requested code and
+  automated testing for now. Do not mark the overall item complete from host
+  tests alone; see [Complication Verification](docs/COMPLICATIONS.md).
 
 ### 12. Watch-Side Quick Actions `[~]`
 

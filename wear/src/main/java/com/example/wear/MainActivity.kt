@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private val _currentTaskSummary = mutableStateOf("")
     private val _nextTaskSummary = mutableStateOf("")
     private val _dailyFocusProgress = mutableStateOf<DailyFocusProgress?>(null)
+    private val complicationNavigation = ComplicationNavigation()
     private var timerRevision = -1L
     private var timerSessionId = UUID.randomUUID().toString()
     private var timerUpdatedAtEpochMs = 0L
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         super.onCreate(savedInstanceState)
 
         restoreTimerState()
+        navigateFromComplication(intent)
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
@@ -151,6 +153,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     while (isRunning && stateName != "PANIC_MODE" && _secondsRemaining.value > 0) {
                         delay(1_000L)
                         if (_isRunning.value) {
+                            val previousPhase = _stateName.value
                             _secondsRemaining.value = (_secondsRemaining.value - 1).coerceAtLeast(0)
                             if (_secondsRemaining.value == 0) {
                                 if (hasWearAuthority) completeStandaloneInterval() else _isRunning.value = false
@@ -158,10 +161,14 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                             if (hasWearAuthority) {
                                 timerUpdatedAtEpochMs = System.currentTimeMillis()
                                 timerRevision = maxOf(timerRevision + 1, timerUpdatedAtEpochMs)
-                                saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
+                                saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value,
+                                    updateComplications = previousPhase != _stateName.value || !_isRunning.value)
                                 if (timerUpdatedAtEpochMs - lastStandalonePublishAtEpochMs >= STANDALONE_PUBLISH_INTERVAL_MS || !_isRunning.value) {
                                     activityScope.launch(Dispatchers.IO) { publishWearSnapshot() }
                                 }
+                            } else if (!_isRunning.value) {
+                                timerUpdatedAtEpochMs = System.currentTimeMillis()
+                                saveStateToPrefs(_stateName.value, 0, false)
                             }
                         }
                     }
@@ -225,13 +232,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 }
 
                 // Sync pager to state changes
-                LaunchedEffect(stateName) {
-                    when (stateName) {
-                        "PANIC_MODE" -> pagerState.animateScrollToPage(3)
-                        "LONG_BREAK" -> pagerState.animateScrollToPage(2)
-                        "SHORT_BREAK" -> pagerState.animateScrollToPage(1)
-                        "FOCUS" -> pagerState.animateScrollToPage(0)
-                    }
+                LaunchedEffect(stateName, complicationNavigation.version) {
+                    val version = complicationNavigation.version
+                    pagerState.animateScrollToPage(complicationNavigation.destination(stateName))
+                    complicationNavigation.completed(version)
                 }
 
                 if (isFrustrated && stateName != "PANIC_MODE") {
@@ -547,12 +551,17 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        navigateFromComplication(intent)
         if (intent.getBooleanExtra("TRIGGER_FRUSTRATION", false)) {
             _isFrustrated.value = true
         }
         if (intent.getBooleanExtra("FORCE_PANIC_UI", false)) {
             _stateName.value = "PANIC_MODE"
         }
+    }
+
+    private fun navigateFromComplication(intent: android.content.Intent) {
+        complicationNavigation.request(intent.action, _stateName.value)
     }
 
     override fun onDataChanged(dataEvents: DataEventBuffer) {
@@ -563,11 +572,13 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     if (dataMap.getString("source_device") == "wear") continue
                     val incomingRevision = dataMap.getLong("timer_revision", -1L)
-                    if (incomingRevision < timerRevision && hasWearAuthority) continue
+                    val persistedRevision = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE).getLong("timer_revision", -1L)
+                    if (incomingRevision < maxOf(timerRevision, persistedRevision)) continue
                     val newStateRaw = dataMap.getString("state") ?: dataMap.getString("current_phase") ?: "FOCUS"
                     val isPanic = dataMap.getBoolean("is_panic_active", false)
 
                     val newState = if (isPanic || newStateRaw == "PANIC_MODE") "PANIC_MODE" else newStateRaw
+                    if (newState !in setOf("FOCUS", "SHORT_BREAK", "LONG_BREAK", "PANIC_MODE")) continue
 
                     // State Transition Haptic (Wave)
                     if (newState != _stateName.value && newState != "PANIC_MODE" && _stateName.value != "PANIC_MODE") {
@@ -575,20 +586,21 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     }
                     _stateName.value = newState
 
-                    val newSeconds = dataMap.getInt("seconds_remaining")
+                    val newSeconds = dataMap.getInt("seconds_remaining").coerceIn(0, 86_400)
                     // 5-minute warning Haptic (Double Tap)
                     if (newState == "FOCUS" && _secondsRemaining.value > 300 && newSeconds <= 300) {
                         triggerDoubleTapHaptic()
                     }
                     val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
-                    val reconciledSeconds = if (dataMap.getBoolean("is_running")) {
-                        (newSeconds - ((System.currentTimeMillis() - updatedAt).coerceAtLeast(0L) / 1_000L).toInt()).coerceAtLeast(0)
-                    } else newSeconds
+                    val elapsedSeconds = if (dataMap.getBoolean("is_running")) {
+                        ((System.currentTimeMillis() - updatedAt).coerceAtLeast(0L) / 1_000L).coerceAtMost(newSeconds.toLong())
+                    } else 0L
+                    val reconciledSeconds = newSeconds - elapsedSeconds.toInt()
                     _secondsRemaining.value = reconciledSeconds
                     _isRunning.value = dataMap.getBoolean("is_running")
                     timerRevision = incomingRevision
                     timerSessionId = dataMap.getString("session_id") ?: timerSessionId
-                    timerUpdatedAtEpochMs = System.currentTimeMillis()
+                    timerUpdatedAtEpochMs = updatedAt + elapsedSeconds * 1_000L
                     wearLeaseExpiresAtEpochMs = 0L
                     hasWearAuthority = false
                     focusDuration = dataMap.getInt("focus_duration", focusDuration)
@@ -606,6 +618,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 } else if (item.uri.path == WearDailyFocusGoal.PATH) {
                     WearDailyFocusGoal.save(this, DataMapItem.fromDataItem(item).dataMap)
                     _dailyFocusProgress.value = WearDailyFocusGoal.read(this)
+                    ComplicationUpdates.goal(this)
                 } else if (item.uri.path == "/pomodoro/tasks") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     _currentTaskSummary.value = dataMap.getString("current_task").orEmpty().take(40)
@@ -615,9 +628,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         }
     }
 
-    private fun saveStateToPrefs(state: String, secondsRemaining: Int, isRunning: Boolean) {
+    private fun saveStateToPrefs(state: String, secondsRemaining: Int, isRunning: Boolean, updateComplications: Boolean = true) {
         val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
-        prefs.edit()
+        synchronized(prefs) {
+            if (timerRevision < prefs.getLong("timer_revision", -1L)) return
+            prefs.edit()
             .putString("state", state)
             .putInt("seconds_remaining", secondsRemaining)
             .putBoolean("is_running", isRunning)
@@ -634,21 +649,12 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             .putBoolean("auto_start_breaks", autoStartBreaks)
             .putBoolean("auto_start_focus", autoStartFocus)
             .apply()
+        }
 
-        val requester = androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester.create(
-            this,
-            android.content.ComponentName(this, PomodoroProgressComplicationService::class.java)
-        )
-        requester.requestUpdateAll()
-
-        val customRequester = androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester.create(
-            this,
-            android.content.ComponentName(this, CustomTextComplicationService::class.java)
-        )
-        customRequester.requestUpdateAll()
+        if (updateComplications) ComplicationUpdates.timer(this)
     }
 
-    private fun restoreTimerState() {
+    internal fun restoreTimerState() {
         _dailyFocusProgress.value = WearDailyFocusGoal.read(this)
         val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
         _stateName.value = prefs.getString("state", "FOCUS") ?: "FOCUS"
@@ -669,6 +675,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         autoStartFocus = prefs.getBoolean("auto_start_focus", false)
         _currentTaskSummary.value = prefs.getString("current_task", "").orEmpty().take(40)
         _nextTaskSummary.value = prefs.getString("next_task", "").orEmpty().take(40)
+        val before = Triple(_stateName.value, _secondsRemaining.value, _isRunning.value)
         if (_isRunning.value && hasWearAuthority) {
             var elapsedSeconds = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1_000L).toInt()
             while (_isRunning.value && elapsedSeconds >= _secondsRemaining.value) {
@@ -679,6 +686,16 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 _secondsRemaining.value = (_secondsRemaining.value - elapsedSeconds).coerceAtLeast(0)
             }
             timerUpdatedAtEpochMs = System.currentTimeMillis()
+        } else if (_isRunning.value) {
+            val elapsed = ((System.currentTimeMillis() - timerUpdatedAtEpochMs).coerceAtLeast(0L) / 1000L)
+                .coerceAtMost(_secondsRemaining.value.coerceAtLeast(0).toLong())
+            _secondsRemaining.value = (_secondsRemaining.value - elapsed.toInt()).coerceAtLeast(0)
+            timerUpdatedAtEpochMs += elapsed * 1000L
+            if (_secondsRemaining.value == 0) _isRunning.value = false
+        }
+        if (before != Triple(_stateName.value, _secondsRemaining.value, _isRunning.value)) {
+            if (hasWearAuthority) timerRevision = maxOf(timerRevision + 1, System.currentTimeMillis())
+            saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
         }
     }
 
@@ -743,10 +760,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE).edit()
                     .putString("custom_text", customText)
                     .apply()
-                // Force update CustomTextComplicationService
-                val componentName = android.content.ComponentName(this, CustomTextComplicationService::class.java)
-                val requester = androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester.create(this, componentName)
-                requester.requestUpdateAll()
+                ComplicationUpdates.text(this)
             }
             "/panic/frustration" -> {
                 _isFrustrated.value = true
@@ -812,7 +826,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
                     // Save to prefs for complication
                     val prefs = getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE)
-                    prefs.edit().putInt("current_hr", hr).apply()
+                    prefs.edit().putInt("current_hr", hr).putLong("current_hr_at", System.currentTimeMillis()).apply()
+                    ComplicationUpdates.heartRate(this)
 
                     if (hr > _heartRateThreshold.value) {
                         if (_stateName.value != "PANIC_MODE") {
