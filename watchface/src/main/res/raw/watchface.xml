@@ -136,11 +136,8 @@
 
         <!-- Right Side: Stacked Time (Bold NDot, No Background) - Background Layer -->
         <Group name="TimeGroup" x="245" y="100" width="205" height="250">
-            <!-- Small ambient translation reduces static pixel retention. -->
-            <Variant mode="AMBIENT" target="x" value="140" />
-            <Variant mode="AMBIENT" target="y" value="104" />
-            <!-- Force TimeGroup to always display in Ambient mode -->
-            <Variant mode="AMBIENT" target="alpha" value="255" />
+            <Variant mode="AMBIENT" target="alpha" value="0" />
+            <Group name="IdleClockContent" x="0" y="0" width="205" height="250">
             <!-- Hide when active session exists in interactive mode -->
             <Transform target="alpha" value="[COMPLICATION.103.RANGED_VALUE_VALUE] &gt;= 0 ? 0 : 255" />
 
@@ -149,7 +146,6 @@
                 <Variant mode="AMBIENT" target="alpha" value="0" />
                 <Text align="CENTER">
                     <Font family="ndot" size="110" color="[CONFIGURATION.hour_color]">
-                        <Variant mode="AMBIENT" target="color" value="#ff777777" />
                         <Template>%s<Parameter expression="[HOUR_1_12_Z]" /></Template>
                     </Font>
                 </Text>
@@ -158,29 +154,12 @@
                 <Variant mode="AMBIENT" target="alpha" value="0" />
                 <Text align="CENTER">
                     <Font family="ndot" size="110" color="[CONFIGURATION.minute_color]">
-                        <Variant mode="AMBIENT" target="color" value="#ff777777" />
                         <Template>%s<Parameter expression="[MINUTE_Z]" /></Template>
                     </Font>
                 </Text>
             </PartText>
 
-            <!-- Ambient Time (Dim Solid Color) -->
-            <PartText x="0" y="0" width="160" height="125" alpha="0">
-                <Variant mode="AMBIENT" target="alpha" value="255" />
-                <Text align="CENTER">
-                    <Font family="ndot" size="110" color="[CONFIGURATION.hour_color]">
-                        <Template>%s<Parameter expression="[HOUR_1_12_Z]" /></Template>
-                    </Font>
-                </Text>
-            </PartText>
-            <PartText x="0" y="125" width="160" height="125" alpha="0">
-                <Variant mode="AMBIENT" target="alpha" value="255" />
-                <Text align="CENTER">
-                    <Font family="ndot" size="110" color="[CONFIGURATION.minute_color]">
-                        <Template>%s<Parameter expression="[MINUTE_Z]" /></Template>
-                    </Font>
-                </Text>
-            </PartText>
+            </Group>
         </Group>
 
         <!-- User-selected logo, supplied by the Wear app with ws_logo as fallback. -->
@@ -191,34 +170,25 @@
             <DefaultProviderPolicy
                 primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.LogoComplicationService"
                 primaryProviderType="SMALL_IMAGE"
-                defaultSystemProvider="EMPTY" />
+                defaultSystemProvider="EMPTY" defaultSystemProviderType="SMALL_IMAGE" />
 
             <Complication type="SMALL_IMAGE">
                 <PartImage x="0" y="0" width="80" height="80">
                     <Image resource="[COMPLICATION.SMALL_IMAGE]" />
                 </PartImage>
             </Complication>
+            <BoundingBox x="0" y="0" width="80" height="80" />
         </ComplicationSlot>
-
-        <!-- Keep panic launch behavior independent of the selected image provider. -->
-        <Group name="LogoTapTarget" x="185" y="10" width="80" height="80">
-            <Variant mode="AMBIENT" target="alpha" value="0" />
-            <PartDraw x="0" y="0" width="80" height="80">
-                <Rectangle x="0" y="0" width="80" height="80">
-                    <Fill color="#00000000" />
-                </Rectangle>
-                <Launch target="panic://trigger" />
-            </PartDraw>
-        </Group>
 
         <!-- Pomodoro Progress Complication (Left Edge) -->
         <ComplicationSlot slotId="103" x="0" y="0" width="450" height="450"
             supportedTypes="RANGED_VALUE">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
 
             <DefaultProviderPolicy
                 primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.PomodoroProgressComplicationService"
                 primaryProviderType="RANGED_VALUE"
-                defaultSystemProvider="EMPTY" />
+                defaultSystemProvider="EMPTY" defaultSystemProviderType="RANGED_VALUE" />
 
             <Complication type="RANGED_VALUE">
                 <!-- Group handles ambient mode hiding -->
@@ -226,7 +196,7 @@
                     <Variant mode="AMBIENT" target="alpha" value="0" />
 
                     <!-- Inner group handles hiding when idle -->
-                    <Group x="0" y="0" width="450" height="450">
+                    <Group name="ActiveProgress" x="0" y="0" width="450" height="450">
                         <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_VALUE] &gt;= 0 ? 255 : 0" />
                     <!-- ════════════════════════════════════════════════════════ -->
                     <!-- PROGRESS ARCS (Symmetric dynamic coloring per state)       -->
@@ -331,21 +301,19 @@
 
 
                     <!-- SESSION TEXT: vertical layout (slot 102: x=45, y=110, width=185, height=200) -->
-                    <Group x="45" y="110" width="185" height="200">
+                    <Group name="SessionLabels" x="45" y="110" width="185" height="200">
 
                         <!-- ════════════════════════════════════════════════════════ -->
                         <!-- 1. FOCUS STATE (Gray Vertical Session Text)             -->
                         <!-- ════════════════════════════════════════════════════════ -->
-                        <Group x="0" y="0" width="185" height="200">
+                        <Group name="FocusLabel" x="0" y="0" width="185" height="200">
                             <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
 
                             <!-- Session Label (Vertical, Gray) -->
-                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                            <Group name="FocusLabelRotation" x="-5" y="0" width="195" height="200" angle="270">
                                 <PartText x="0" y="0" width="195" height="200">
                                     <Text align="CENTER">
-                                        <Font family="ndot" size="26" color="#ff888888">
-                                            <Template>FOCUS</Template>
-                                        </Font>
+                                        <Font family="ndot" size="26" color="#ff888888">FOCUS</Font>
                                     </Text>
                                 </PartText>
                             </Group>
@@ -354,16 +322,14 @@
                         <!-- ════════════════════════════════════════════════════════ -->
                         <!-- 2. LONG BREAK STATE (Gray Vertical Text)                -->
                         <!-- ════════════════════════════════════════════════════════ -->
-                        <Group x="0" y="0" width="185" height="200">
+                        <Group name="LongBreakLabel" x="0" y="0" width="185" height="200">
                             <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
 
                             <!-- Session Label (Vertical, Gray) -->
-                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                            <Group name="LongBreakLabelRotation" x="-5" y="0" width="195" height="200" angle="270">
                                 <PartText x="0" y="0" width="195" height="200">
                                     <Text align="CENTER">
-                                        <Font family="ndot" size="26" color="#ff888888">
-                                            <Template>LONG BREAK</Template>
-                                        </Font>
+                                        <Font family="ndot" size="26" color="#ff888888">LONG BREAK</Font>
                                     </Text>
                                 </PartText>
                             </Group>
@@ -372,16 +338,14 @@
                         <!-- ════════════════════════════════════════════════════════ -->
                         <!-- 3. SHORT BREAK STATE (Gray Vertical Text)               -->
                         <!-- ════════════════════════════════════════════════════════ -->
-                        <Group x="0" y="0" width="185" height="200">
+                        <Group name="ShortBreakLabel" x="0" y="0" width="185" height="200">
                             <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
 
                             <!-- Session Label (Vertical, Gray) -->
-                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                            <Group name="ShortBreakLabelRotation" x="-5" y="0" width="195" height="200" angle="270">
                                 <PartText x="0" y="0" width="195" height="200">
                                     <Text align="CENTER">
-                                        <Font family="ndot" size="26" color="#ff888888">
-                                            <Template>SHORT BREAK</Template>
-                                        </Font>
+                                        <Font family="ndot" size="26" color="#ff888888">SHORT BREAK</Font>
                                     </Text>
                                 </PartText>
                             </Group>
@@ -389,16 +353,14 @@
                         <!-- ════════════════════════════════════════════════════════ -->
                         <!-- 4. PANIC STATE (Gray Vertical Text)                     -->
                         <!-- ════════════════════════════════════════════════════════ -->
-                        <Group x="0" y="0" width="185" height="200">
+                        <Group name="PanicLabel" x="0" y="0" width="185" height="200">
                             <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
 
                             <!-- Session Label (Vertical, Gray) -->
-                            <Group x="-5" y="0" width="195" height="200" angle="270">
+                            <Group name="PanicLabelRotation" x="-5" y="0" width="195" height="200" angle="270">
                                 <PartText x="0" y="0" width="195" height="200">
                                     <Text align="CENTER">
-                                        <Font family="ndot" size="26" color="#ff888888">
-                                            <Template>PANIC!</Template>
-                                        </Font>
+                                        <Font family="ndot" size="26" color="#ff888888">PANIC!</Font>
                                     </Text>
                                 </PartText>
                             </Group>
@@ -408,9 +370,7 @@
 
                     <!-- Black mask to cover standard TimeGroup when session is active -->
                     <PartDraw x="0" y="0" width="450" height="450">
-                        <Variant mode="AMBIENT" target="alpha" value="255" />
                         <Rectangle x="240" y="90" width="190" height="260">
-                            <Variant mode="AMBIENT" target="x" value="140" />
                             <Fill color="#ff000000" />
                         </Rectangle>
                     </PartDraw>
@@ -426,12 +386,11 @@
                     <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_VALUE] &gt;= 0 ? 255 : 0" />
 
                         <!-- 1. FOCUS STATE (Blue) -->
-                        <Group x="0" y="0" width="160" height="250">
+                        <Group name="FocusCountdown" x="0" y="0" width="160" height="250">
                             <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &gt; 1000 ? 255 : 0" />
                             <PartText x="0" y="0" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ff42a5f5">
-                                        <Variant mode="AMBIENT" target="color" value="#ff20527a" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -439,7 +398,6 @@
                             <PartText x="0" y="125" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ff42a5f5">
-                                        <Variant mode="AMBIENT" target="color" value="#ff20527a" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -447,12 +405,11 @@
                         </Group>
 
                         <!-- 2. LONG BREAK STATE (Green) -->
-                        <Group x="0" y="0" width="160" height="250">
+                        <Group name="LongBreakCountdown" x="0" y="0" width="160" height="250">
                             <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 500 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 1200 ? 255 : 0)" />
                             <PartText x="0" y="0" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ff81c784">
-                                        <Variant mode="AMBIENT" target="color" value="#ff406342" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -460,7 +417,6 @@
                             <PartText x="0" y="125" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ff81c784">
-                                        <Variant mode="AMBIENT" target="color" value="#ff406342" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -468,12 +424,11 @@
                         </Group>
 
                         <!-- 3. SHORT BREAK STATE (Yellow) -->
-                        <Group x="0" y="0" width="160" height="250">
+                        <Group name="ShortBreakCountdown" x="0" y="0" width="160" height="250">
                             <Transform target="alpha" value="([COMPLICATION.RANGED_VALUE_MAX] &gt; 100 ? 1 : 0) * ([COMPLICATION.RANGED_VALUE_MAX] &lt; 500 ? 255 : 0)" />
                             <PartText x="0" y="0" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ffffca28">
-                                        <Variant mode="AMBIENT" target="color" value="#ff806514" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -481,7 +436,6 @@
                             <PartText x="0" y="125" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ffffca28">
-                                        <Variant mode="AMBIENT" target="color" value="#ff806514" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -489,12 +443,11 @@
                         </Group>
 
                         <!-- 4. PANIC STATE (Red) -->
-                        <Group x="0" y="0" width="160" height="250">
+                        <Group name="PanicCountdown" x="0" y="0" width="160" height="250">
                             <Transform target="alpha" value="[COMPLICATION.RANGED_VALUE_MAX] &lt; 100 ? 255 : 0" />
                             <PartText x="0" y="0" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ffef5350">
-                                        <Variant mode="AMBIENT" target="color" value="#ff782928" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] / 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -502,7 +455,6 @@
                             <PartText x="0" y="125" width="160" height="125">
                                 <Text align="CENTER">
                                     <Font family="ndot" size="110" color="#ffef5350">
-                                        <Variant mode="AMBIENT" target="color" value="#ff782928" />
                                         <Template>%02d<Parameter expression="floor([COMPLICATION.RANGED_VALUE_VALUE] % 60)" /></Template>
                                     </Font>
                                 </Text>
@@ -510,11 +462,13 @@
                         </Group>
                     </Group>
             </Complication>
+            <BoundingOval x="0" y="0" width="450" height="450" />
         </ComplicationSlot>
 
         <!-- Bottom Right: Day and Date Complication (slot 104) -->
         <ComplicationSlot slotId="104" x="235" y="375" width="160" height="50"
             supportedTypes="SHORT_TEXT">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
 
             <DefaultProviderPolicy
                 defaultSystemProvider="DAY_AND_DATE"
@@ -529,21 +483,23 @@
                     </Text>
                 </PartText>
             </Complication>
+            <BoundingBox x="0" y="0" width="160" height="50" />
         </ComplicationSlot>
 
         <!-- Left Side: Custom Text Complication (slot 102) -->
         <ComplicationSlot slotId="102" x="45" y="110" width="185" height="200"
             supportedTypes="SHORT_TEXT LONG_TEXT EMPTY">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
 
             <DefaultProviderPolicy
                 primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.CustomTextComplicationService"
                 primaryProviderType="SHORT_TEXT"
-                defaultSystemProvider="EMPTY" />
+                defaultSystemProvider="EMPTY" defaultSystemProviderType="SHORT_TEXT" />
 
             <Complication type="SHORT_TEXT">
                 <PartText x="0" y="0" width="185" height="200">
                     <Variant mode="AMBIENT" target="alpha" value="0" />
-                    <Text align="START" overflow="ELLIPSIS" maxLines="5">
+                    <Text align="START" ellipsis="TRUE" maxLines="5">
                         <Font family="twinkle_star" size="32" color="#ffffffff">
                             <Template>%s<Parameter expression="[COMPLICATION.TEXT]" /></Template>
                         </Font>
@@ -554,13 +510,15 @@
             <Complication type="LONG_TEXT">
                 <PartText x="0" y="0" width="185" height="200">
                     <Variant mode="AMBIENT" target="alpha" value="0" />
-                    <Text align="START" overflow="ELLIPSIS" maxLines="5">
+                    <Text align="START" ellipsis="TRUE" maxLines="5">
                         <Font family="twinkle_star" size="32" color="#ffffffff">
                             <Template>%s<Parameter expression="[COMPLICATION.TEXT]" /></Template>
                         </Font>
                     </Text>
                 </PartText>
             </Complication>
+            <Complication type="EMPTY" />
+            <BoundingBox x="0" y="0" width="185" height="200" />
         </ComplicationSlot>
 
 
@@ -575,12 +533,34 @@
                 </Arc>
                 <!-- Filled track syncing with seconds -->
                 <Arc centerX="225" centerY="225" width="430" height="430" startAngle="45" endAngle="135">
-                    <Variant mode="AMBIENT" target="alpha" value="0" />
                     <Stroke color="[CONFIGURATION.second_color]" thickness="4" cap="ROUND" dashIntervals="4 8" />
                     <!-- Bind endAngle to seconds. Total arc is 90 degrees. -->
                     <Transform target="endAngle" value="45 + (90 * [SECOND] / 60)" />
                 </Arc>
             </PartDraw>
+        </Group>
+
+        <!-- Above the full-face timer slot so the logo remains independently tappable. -->
+        <Group name="LogoTapTarget" x="185" y="10" width="80" height="80">
+            <Variant mode="AMBIENT" target="alpha" value="0" />
+            <PartDraw x="0" y="0" width="80" height="80">
+                <Rectangle x="0" y="0" width="80" height="80">
+                    <Fill color="#00000000" />
+                </Rectangle>
+                <Launch target="panic://trigger" />
+            </PartDraw>
+        </Group>
+
+        <!-- System burn-in shifting has a generous margin; ambient never depends on complication delivery. -->
+        <Group name="AmbientClock" x="0" y="0" width="450" height="450" alpha="0">
+            <Variant mode="AMBIENT" target="alpha" value="255" />
+            <PartText x="100" y="180" width="250" height="90">
+                <Text align="CENTER">
+                    <Font family="ndot" size="78" color="#ff777777">
+                        <Template>%s:%s<Parameter expression="[HOUR_1_12_Z]" /><Parameter expression="[MINUTE_Z]" /></Template>
+                    </Font>
+                </Text>
+            </PartText>
         </Group>
 
     </Scene>

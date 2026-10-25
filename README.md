@@ -1,5 +1,7 @@
 # Pixel Dot Matrix
 
+Watch-face ambient behavior and validation: [Ambient safeguards](docs/AMBIENT.md).
+
 Pixel Dot Matrix is an open-source, local-first Pomodoro system for Android
 phones and Wear OS. The repository contains a phone companion, a circular
 Wear OS app, and a Watch Face Format (WFF) watch face.

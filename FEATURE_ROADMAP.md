@@ -22,10 +22,10 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 |---|---:|---:|---:|---:|---:|
 | 1. State and reliability | 1-5 | 5 | 0 | 0 | 0 |
 | 2. Phone productivity | 6-10 | 2 | 3 | 0 | 0 |
-| 3. Wear experience | 11-14 | 0 | 3 | 0 | 1 |
+| 3. Wear experience | 11-14 | 0 | 4 | 0 | 0 |
 | 4. Watch Face Studio | 15-17 | 0 | 3 | 0 | 0 |
 | 5. Protection and privacy | 18-20 | 0 | 3 | 0 | 0 |
-| **Total** | **20** | **7** | **12** | **0** | **1** |
+| **Total** | **20** | **7** | **13** | **0** | **0** |
 
 ## Master Tracker
 
@@ -44,7 +44,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 | 11 | Actionable complications | P1 | `[~]` | 2, 3, 7 |
 | 12 | Watch-side quick actions | P1 | `[~]` | 2, 3 |
 | 13 | Better haptic language | P1 | `[~]` | 1, 5 |
-| 14 | Ambient safeguards | P0 | `[ ]` | 4 |
+| 14 | Ambient safeguards | P0 | `[~]` | 4 |
 | 15 | Watch-face theme presets | P1 | `[~]` | 4 |
 | 16 | Logo controls | P2 | `[~]` | 4 |
 | 17 | Custom color support | P2 | `[~]` | 4, WFF constraints |
@@ -387,7 +387,7 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Physical pattern distinction, ambient restrictions, and calibration remain
   pending because the watch is unavailable; see [Haptics](docs/HAPTICS.md).
 
-### 14. Ambient Safeguards `[ ]`
+### 14. Ambient Safeguards `[~]`
 
 **Scope**
 - Audit burn-in movement, pixel ratio, and static bright regions.
@@ -400,6 +400,16 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - [ ] No important content clips on supported round dimensions.
 - [ ] Twenty-four-hour ambient soak test shows no renderer failures.
 - [ ] Battery usage is compared before and after the change.
+
+**Implementation and verification**
+- Ambient now has one independent dim hour/minute clock; all interactive
+  imagery, complications, arcs, and countdowns are hidden.
+- Official WFF v2 schema and memory checks pass. The schema audit also repaired
+  pre-existing invalid elements and missing complication bounds.
+- Geometry checks enforce a conservative 14.15% lit-area upper bound and safe
+  round bounds with system shift. CI/release gates validate schema and memory.
+- Actual rendering, binding, clipping, 24-hour soak, and battery comparison
+  remain pending; see [Ambient safeguards](docs/AMBIENT.md).
 
 ## Phase 4: Watch Face Studio
 

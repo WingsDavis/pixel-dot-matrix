@@ -401,7 +401,7 @@ When working on this project, verify and build on top of these files:
    - Background WearableListenerService capturing direct synchronization and stress messages.
 3. **`wear/src/main/java/com/example/wear/PomodoroProgressComplicationService.kt`**
    - Service broadcasting pomodoro countdown data ranges to the active watch face.
-4. **`wear/src/main/res/raw/watchface.xml`**
-   - Declarative Watch Face Format (WFF) defining the massive dot matrix timers, progress arcs, and dynamic ambient layout logic.
+4. **`watchface/src/main/res/raw/watchface.xml`**
+   - Authoritative WFF v2 layout. Interactive timers, arcs, imagery, and complications hide in ambient; an independent dim minute-precision clock remains visible.
 5. **`wear/src/main/java/com/example/wear/BottomRightComplicationService.kt`**
    - Owned bottom-right complication provider whose rendered value is controlled by phone-pushed watch face config.

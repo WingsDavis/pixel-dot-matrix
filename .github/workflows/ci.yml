@@ -23,6 +23,11 @@ jobs:
       - run: chmod +x gradlew
       - name: Test and build debug APKs
         run: ./gradlew --no-parallel testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug :wear:assembleDebug :watchface:assembleDebug
+      - name: Validate WFF schema and memory limits
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/memory-footprint.jar" https://github.com/google/watchface/releases/download/release/memory-footprint.jar
+          echo "98892722dcb0cf3c872776fa5ec1ba5aea1289621f04d15324e854b1cdaa3460  $RUNNER_TEMP/memory-footprint.jar" | sha256sum --check
+          java -jar "$RUNNER_TEMP/memory-footprint.jar" --watch-face watchface/build/outputs/apk/debug/watchface-debug.apk --schema-version 2
       - uses: actions/upload-artifact@v7
         with:
           name: pixel-dot-matrix-debug-apks
