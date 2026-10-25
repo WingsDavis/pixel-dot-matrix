@@ -27,6 +27,10 @@ import androidx.compose.ui.input.rotary.onPreRotaryScrollEvent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.wear.compose.foundation.lazy.ScalingLazyListState
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 
@@ -50,6 +54,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
@@ -60,14 +67,23 @@ import java.nio.charset.StandardCharsets
 import com.example.wear.ui.theme.*
 import com.example.wear.ui.components.*
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import com.example.core.goal.DailyFocusProgress
+import com.example.core.sync.SyncAppliedAck
+import com.example.core.sync.WearCommandProtocol
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener, SensorEventListener {
 
     private val dataClient by lazy { Wearable.getDataClient(this) }
     private val messageClient by lazy { Wearable.getMessageClient(this) }
     private val nodeClient by lazy { Wearable.getNodeClient(this) }
-    private val commandOutbox by lazy { WearCommandOutbox(this, nodeClient, messageClient) }
+    private val commandOutboxResult by lazy { runCatching { WearCommandOutbox(this, nodeClient, messageClient) } }
+    private val commandOutbox get() = commandOutboxResult.getOrThrow()
+    private val emptyCommandRecords = MutableStateFlow<List<WearQueuedCommand>>(emptyList())
+    private val actionSelection = WatchActionSelection()
+    private val selectedCommandId = actionSelection.id
+    private val localActionFeedback = mutableStateOf<WatchActionFeedback?>(null)
     private val wearHaptics by lazy { WearHaptics(this) }
 
     // Remote State (synced from phone)
@@ -108,6 +124,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        actionSelection.restore(savedInstanceState)
 
         restoreTimerState()
         navigateFromComplication(intent)
@@ -148,6 +165,27 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val heartRateThreshold by _heartRateThreshold
                 val stepsTakenInPanic by _stepsTakenInPanic
                 val isFrustrated by _isFrustrated
+                val commandRecords by (commandOutboxResult.getOrNull()?.records ?: emptyCommandRecords).collectAsState()
+                val selectedCommand = actionSelection.selected(commandRecords, localActionFeedback.value != null)
+                val feedback = if (localActionFeedback.value?.error != null) localActionFeedback.value else {
+                    selectedCommand?.toFeedback() ?: localActionFeedback.value ?: commandOutboxResult.exceptionOrNull()?.let {
+                        WatchActionFeedback("ACTIONS UNAVAILABLE", it.message ?: "Saved actions could not be loaded")
+                    }
+                }
+                LaunchedEffect(selectedCommand?.id, selectedCommand?.status) {
+                    if (selectedCommand != null && actionSelection.notifyResult && selectedCommand.id == selectedCommandId.value) {
+                        when (selectedCommand.status) {
+                            WearCommandStatus.APPLIED -> {
+                                localActionFeedback.value = null
+                                wearHaptics.play(WearHapticPattern.SUCCESS)
+                            }
+                            WearCommandStatus.FAILED -> if (localActionFeedback.value?.title != "RETRYING") {
+                                wearHaptics.play(WearHapticPattern.FAILURE)
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
 
                 LaunchedEffect(isRunning, stateName) {
                     while (isRunning && stateName != "PANIC_MODE" && _secondsRemaining.value > 0) {
@@ -223,6 +261,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val pagerState = rememberPagerState(pageCount = { 6 })
                 val focusRequester = remember { FocusRequester() }
                 val coroutineScope = rememberCoroutineScope()
+                val quickActionsListState = rememberScalingLazyListState()
                 var rotaryAccumulator by remember { mutableFloatStateOf(0f) }
                 var rotaryDirection by remember { mutableIntStateOf(0) }
                 var rotaryLocked by remember { mutableStateOf(false) }
@@ -256,6 +295,13 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         modifier = Modifier
                             .fillMaxSize()
                             .onPreRotaryScrollEvent { event ->
+                                if (shouldScrollQuickActions(pagerState.currentPage, event.verticalScrollPixels,
+                                    quickActionsListState.canScrollForward, quickActionsListState.canScrollBackward)) {
+                                    rotaryAccumulator = 0f
+                                    coroutineScope.launch { quickActionsListState.scrollBy(event.verticalScrollPixels) }
+                                    wearHaptics.play(WearHapticPattern.NAVIGATION_TICK, 32)
+                                    return@onPreRotaryScrollEvent true
+                                }
                                 val direction = if (event.verticalScrollPixels > 0f) 1 else -1
                                 if (direction != rotaryDirection) {
                                     rotaryDirection = direction
@@ -372,6 +418,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                                 haptics = wearHaptics,
                                 currentTask = currentTaskSummary,
                                 nextTask = nextTaskSummary,
+                                feedback = feedback,
+                                failedCommands = commandRecords.filter { it.status == WearCommandStatus.FAILED && it.id != feedback?.retryId },
+                                listState = quickActionsListState,
+                                onRetry = ::retryWatchAction,
                                 onFocus = { sendTimerCommand("START_FOCUS") },
                                 onBreak = { sendTimerCommand("START_SHORT_BREAK") },
                                 onDistraction = { sendMessageToPhone("/incident/mark", "DISTRACTION") }
@@ -408,7 +458,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         activityScope.launch(Dispatchers.IO) {
             while (isActive) {
                 withContext(Dispatchers.Main) { _dailyFocusProgress.value = WearDailyFocusGoal.read(this@MainActivity) }
-                commandOutbox.flush()
+                runCatching { commandOutboxResult.getOrNull()?.flush() }
+                    .onFailure { Log.e(TAG, "Could not retry watch actions", it) }
                 if (hasWearAuthority && runCatching { Tasks.await(nodeClient.connectedNodes).isNotEmpty() }.getOrDefault(false)) {
                     publishWearSnapshot()
                 }
@@ -424,6 +475,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         sensorManager.unregisterListener(this)
         activityScope.cancel()
         stopVibrator()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        actionSelection.save(outState)
+        super.onSaveInstanceState(outState)
     }
 
     // --- Bidirectional Wearable Communication ---
@@ -459,33 +515,64 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     }
 
     private fun sendMessageToPhone(path: String, payload: String) {
+        val commandId = beginWatchAction()
         activityScope.launch(Dispatchers.IO) {
             try {
-                val delivered = commandOutbox.sendOrQueue(path, payload, timerRevision)
-                if (!delivered) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Saved. Will sync when phone connects", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                Log.d(TAG, "Sent message $payload to path $path")
+                commandOutbox.sendOrQueue(path, payload, timerRevision, commandId)
+                withContext(Dispatchers.Main) { if (selectedCommandId.value == commandId) localActionFeedback.value = null }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send message to phone", e)
+                withContext(Dispatchers.Main) { showActionFailure(e, commandId) }
             }
         }
     }
 
     private fun sendTimerCommand(action: String) {
+        val commandId = beginWatchAction()
         activityScope.launch(Dispatchers.IO) {
-            val connected = runCatching { Tasks.await(nodeClient.connectedNodes).isNotEmpty() }.getOrDefault(false)
-            if (connected) {
-                commandOutbox.sendOrQueue("/pomodoro/control", action, timerRevision)
-            } else {
-                withContext(Dispatchers.Main) { applyStandaloneAction(action) }
-                publishWearSnapshot()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Running on watch until phone reconnects", Toast.LENGTH_SHORT).show()
+            try {
+                val connected = runCatching { Tasks.await(nodeClient.connectedNodes, 3, TimeUnit.SECONDS).isNotEmpty() }.getOrDefault(false)
+                if (connected) {
+                    commandOutbox.sendOrQueue("/pomodoro/control", action, timerRevision, commandId)
+                    withContext(Dispatchers.Main) { if (selectedCommandId.value == commandId) localActionFeedback.value = null }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        applyStandaloneAction(action)
+                        if (selectedCommandId.value == commandId) {
+                            actionSelection.clear()
+                            localActionFeedback.value = WatchActionFeedback("ON WATCH")
+                        }
+                    }
+                    publishWearSnapshot()
                 }
+            } catch (error: Exception) {
+                withContext(Dispatchers.Main) { showActionFailure(error, commandId) }
             }
+        }
+    }
+
+    private fun beginWatchAction(): String = UUID.randomUUID().toString().also {
+        actionSelection.begin(it)
+        localActionFeedback.value = WatchActionFeedback("SAVING")
+        wearHaptics.play(WearHapticPattern.NAVIGATION_TICK, 32)
+    }
+
+    private fun showActionFailure(error: Exception, id: String) {
+        if (selectedCommandId.value == id) {
+            localActionFeedback.value = WatchActionFeedback("ACTION NOT CONFIRMED", error.message ?: "Could not save action")
+            wearHaptics.play(WearHapticPattern.FAILURE)
+        }
+        Log.e(TAG, "Watch action failed", error)
+    }
+
+    private fun retryWatchAction(id: String) {
+        actionSelection.begin(id)
+        localActionFeedback.value = WatchActionFeedback("RETRYING")
+        wearHaptics.play(WearHapticPattern.NAVIGATION_TICK, 32)
+        activityScope.launch(Dispatchers.IO) {
+            try {
+                commandOutbox.retry(id, timerRevision)
+                withContext(Dispatchers.Main) { if (selectedCommandId.value == id) localActionFeedback.value = null }
+            } catch (error: Exception) { withContext(Dispatchers.Main) { showActionFailure(error, id) } }
         }
     }
 
@@ -526,7 +613,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     }
 
     private fun publishWearSnapshot() {
-        val sourceNode = runCatching { Tasks.await(nodeClient.localNode).id }.getOrDefault("wear")
+        val sourceNode = runCatching { Tasks.await(nodeClient.localNode, 3, TimeUnit.SECONDS).id }.getOrDefault("wear")
         val request = PutDataMapRequest.create("/pomodoro/state").apply {
             dataMap.putString("state", _stateName.value)
             dataMap.putString("current_phase", _stateName.value)
@@ -543,7 +630,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             dataMap.putLong("timestamp", timerUpdatedAtEpochMs)
             dataMap.putInt("completed_focus_sessions", completedFocusSessions)
         }.asPutDataRequest().setUrgent()
-        runCatching { Tasks.await(dataClient.putDataItem(request)) }
+        runCatching { Tasks.await(dataClient.putDataItem(request), 10, TimeUnit.SECONDS) }
             .onSuccess { lastStandalonePublishAtEpochMs = System.currentTimeMillis() }
             .onFailure { Log.e(TAG, "Failed to publish standalone timer snapshot", it) }
     }
@@ -611,7 +698,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         .coerceIn(0, longBreakCadence - 1)
                     autoStartBreaks = dataMap.getBoolean("auto_start_breaks", autoStartBreaks)
                     autoStartFocus = dataMap.getBoolean("auto_start_focus", autoStartFocus)
-                    activityScope.launch(Dispatchers.IO) { commandOutbox.flush() }
+                    activityScope.launch(Dispatchers.IO) {
+                        runCatching { commandOutboxResult.getOrNull()?.flush() }
+                            .onFailure { Log.e(TAG, "Could not retry watch actions", it) }
+                    }
 
                     saveStateToPrefs(_stateName.value, _secondsRemaining.value, _isRunning.value)
                     Log.d(TAG, "Watch state updated from phone: state=${_stateName.value}, running=${_isRunning.value}, panic=$isPanic")
@@ -619,6 +709,14 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     WearDailyFocusGoal.save(this, DataMapItem.fromDataItem(item).dataMap)
                     _dailyFocusProgress.value = WearDailyFocusGoal.read(this)
                     ComplicationUpdates.goal(this)
+                } else if (item.uri.path?.startsWith(WearCommandProtocol.ACK_PREFIX) == true) {
+                    val data = DataMapItem.fromDataItem(item).dataMap
+                    val id = item.uri.path!!.removePrefix(WearCommandProtocol.ACK_PREFIX)
+                    val payload = data.getByteArray("payload")
+                    if (data.getInt("schema_version", 0) == WearCommandProtocol.SCHEMA_VERSION &&
+                        data.getString("command_id") == id && payload?.let(SyncAppliedAck::decode)?.id == id) {
+                        payload?.let(::acknowledgeWatchAction)
+                    }
                 } else if (item.uri.path == "/pomodoro/tasks") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     _currentTaskSummary.value = dataMap.getString("current_task").orEmpty().take(40)
@@ -743,8 +841,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         Log.d(TAG, "Watch received message: ${messageEvent.path}")
         when (messageEvent.path) {
             "/pomodoro/control_ack" -> {
-                val commandId = messageEvent.data.toString(Charsets.UTF_8).substringBefore('|')
-                if (commandId.isNotBlank()) commandOutbox.acknowledge(commandId)
+                acknowledgeWatchAction(messageEvent.data)
             }
             "/panic/trigger" -> {
                 _stateName.value = "PANIC_MODE"
@@ -765,6 +862,14 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             "/panic/frustration" -> {
                 _isFrustrated.value = true
             }
+        }
+    }
+
+    private fun acknowledgeWatchAction(payload: ByteArray) {
+        val copy = payload.copyOf()
+        activityScope.launch(Dispatchers.IO) {
+            runCatching { commandOutbox.acknowledge(copy) }
+                .onFailure { Log.e(TAG, "Could not save action acknowledgement", it) }
         }
     }
 
@@ -957,102 +1062,145 @@ fun FrustrationWarningScreen(
     }
 }
 
+internal data class WatchActionFeedback(val title: String, val error: String? = null, val retryId: String? = null)
+
+internal class WatchActionSelection {
+    val id = mutableStateOf<String?>(null)
+    var notifyResult: Boolean = false
+        private set
+
+    fun begin(commandId: String) { id.value = commandId; notifyResult = true }
+    fun clear() { id.value = null; notifyResult = false }
+    fun save(state: Bundle) { state.putString(KEY, id.value) }
+    fun restore(state: Bundle?) {
+        id.value = state?.getString(KEY)?.takeIf(WearCommandProtocol::validId)
+        notifyResult = false
+    }
+    fun selected(records: List<WearQueuedCommand>, localFeedback: Boolean): WearQueuedCommand? =
+        if (id.value != null) records.firstOrNull { it.id == id.value }
+        else if (localFeedback) null else records.maxByOrNull { it.createdAt }
+
+    companion object { private const val KEY = "selected_watch_action" }
+}
+
+internal fun WearQueuedCommand.toFeedback() = WatchActionFeedback(
+    when (status) {
+        WearCommandStatus.QUEUED -> "QUEUED"
+        WearCommandStatus.DELIVERED -> "SENT"
+        WearCommandStatus.APPLIED -> "APPLIED"
+        WearCommandStatus.FAILED -> "FAILED"
+    },
+    error ?: when (status) {
+        WearCommandStatus.QUEUED -> "Waiting for phone"
+        WearCommandStatus.DELIVERED -> "Waiting for confirmation"
+        else -> null
+    },
+    id.takeIf { status == WearCommandStatus.FAILED }
+)
+
+internal fun shouldScrollQuickActions(page: Int, delta: Float, forward: Boolean, backward: Boolean): Boolean =
+    page == 4 && ((delta > 0 && forward) || (delta < 0 && backward))
+
 @Composable
-private fun WearQuickActions(
+internal fun WearQuickActions(
     haptics: WearHaptics,
     currentTask: String,
     nextTask: String,
+    feedback: WatchActionFeedback?,
+    failedCommands: List<WearQueuedCommand> = emptyList(),
+    listState: ScalingLazyListState = rememberScalingLazyListState(),
+    onRetry: (String) -> Unit,
     onFocus: () -> Unit,
     onBreak: () -> Unit,
     onDistraction: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+    ScalingLazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            repeat(7) { index ->
-                Box(
-                    Modifier
-                        .size(5.dp)
-                        .background(if (index < 3) TealAccent else CardWhite.copy(alpha = 0.25f), CircleShape)
-                )
+        item {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    repeat(7) { index ->
+                        Box(Modifier.size(5.dp).background(
+                            if (index < 3) TealAccent else CardWhite.copy(alpha = 0.25f), CircleShape))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("QUICK ACTIONS", fontFamily = DotMatrixFont, fontSize = 14.sp,
+                    color = CardWhite, textAlign = TextAlign.Center)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "QUICK ACTIONS",
-            fontFamily = DotMatrixFont,
-            fontSize = 17.sp,
-            color = CardWhite
-        )
+        if (feedback != null) {
+            item {
+                Column(Modifier.fillMaxWidth().heightIn(min = 40.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(feedback.title, fontFamily = DotMatrixFont, fontSize = 12.sp,
+                        color = if (feedback.retryId != null || feedback.title == "ACTION NOT CONFIRMED") PanicRed else TealAccent,
+                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    feedback.error?.let { Text(it, fontSize = 11.sp, color = CardWhite.copy(alpha = 0.85f),
+                        maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                }
+            }
+            feedback.retryId?.let { id -> item { DotMatrixActionButton("RETRY", Icons.Default.Refresh, PanicRed) { onRetry(id) } } }
+        }
+        item { DotMatrixActionButton("FOCUS", Icons.Default.PlayArrow, Color(0xFF42A5F5), onFocus) }
+        item { DotMatrixActionButton("BREAK", Icons.Default.Coffee, Color(0xFFFFCA28), onBreak) }
+        item { DotMatrixActionButton("DISTRACTION", Icons.Default.Report, PanicRed, onDistraction) }
         if (currentTask.isNotBlank()) {
-            Text(
-                text = currentTask,
-                fontFamily = DotMatrixFont,
-                fontSize = 11.sp,
-                color = TealAccent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-            if (nextTask.isNotBlank()) {
-                Text(
-                    text = "NEXT  $nextTask",
-                    fontFamily = DotMatrixFont,
-                    fontSize = 9.sp,
-                    color = CardWhite.copy(alpha = 0.5f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(currentTask, fontFamily = DotMatrixFont, fontSize = 12.sp, color = TealAccent,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    if (nextTask.isNotBlank()) Text("NEXT  $nextTask", fontSize = 11.sp,
+                        color = CardWhite.copy(alpha = 0.7f), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        DotMatrixActionButton("FOCUS", Icons.Default.PlayArrow, Color(0xFF42A5F5), onFocus)
-        Spacer(Modifier.height(7.dp))
-        DotMatrixActionButton("BREAK", Icons.Default.Coffee, Color(0xFFFFCA28), onBreak)
-        Spacer(Modifier.height(7.dp))
-        DotMatrixActionButton("DISTRACTION", Icons.Default.Report, PanicRed, onDistraction)
-        Spacer(Modifier.height(10.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = { haptics.setEnabled(!haptics.isEnabled) },
-                modifier = Modifier.weight(1f).height(34.dp),
-                shape = RoundedCornerShape(6.dp),
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (haptics.isEnabled) TealAccent.copy(alpha = 0.25f) else CardWhite.copy(alpha = 0.12f),
-                    contentColor = CardWhite
-                )
-            ) {
-                Text(if (haptics.isEnabled) "HAPTIC ON" else "HAPTIC OFF", fontFamily = DotMatrixFont, fontSize = 10.sp)
+        items(failedCommands.size) { index ->
+            val failed = failedCommands[index]
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${failed.action.replace('_', ' ')} FAILED", fontSize = 11.sp, color = PanicRed,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                failed.error?.let { Text(it, fontSize = 11.sp, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                DotMatrixActionButton("RETRY", Icons.Default.Refresh, PanicRed) { onRetry(failed.id) }
             }
-            Spacer(Modifier.width(6.dp))
-            Text("${haptics.intensity}", fontFamily = DotMatrixFont, fontSize = 11.sp, color = CardWhite.copy(alpha = 0.65f))
-            WearBentoIconButton(
-                onClick = { haptics.setIntensity(haptics.intensity - 32) },
-                modifier = Modifier.size(30.dp),
-                color = CardWhite.copy(alpha = 0.14f),
-                contentColor = CardWhite
-            ) { Icon(Icons.Default.Remove, contentDescription = "Lower haptic intensity", modifier = Modifier.size(14.dp)) }
-            WearBentoIconButton(
-                onClick = { haptics.setIntensity(haptics.intensity + 32) },
-                modifier = Modifier.size(30.dp),
-                color = CardWhite.copy(alpha = 0.14f),
-                contentColor = CardWhite
-            ) { Icon(Icons.Default.Add, contentDescription = "Raise haptic intensity", modifier = Modifier.size(14.dp)) }
         }
-        DotMatrixActionButton("TEST HAPTIC", Icons.Default.Vibration, TealAccent) {
-            haptics.play(WearHapticPattern.SUCCESS)
-        }
+        item { WatchHapticToggle(haptics) }
+        item { WatchHapticIntensity(haptics) }
+        item { DotMatrixActionButton("TEST HAPTIC", Icons.Default.Vibration, TealAccent) { haptics.play(WearHapticPattern.SUCCESS) } }
     }
+}
+
+@Composable
+private fun WatchHapticToggle(haptics: WearHaptics) {
+    var enabled by remember(haptics) { mutableStateOf(haptics.isEnabled) }
+    ToggleChip(checked = enabled, onCheckedChange = { enabled = it; haptics.setEnabled(it) },
+        label = { Text("HAPTICS", fontFamily = DotMatrixFont, fontSize = 12.sp) },
+        toggleControl = { Switch(checked = enabled) }, modifier = Modifier.fillMaxWidth())
+}
+
+@Composable
+private fun WatchHapticIntensity(haptics: WearHaptics) {
+    var intensity by remember(haptics) { mutableIntStateOf(haptics.intensity) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(intensity.toString(), Modifier.weight(1f), fontFamily = DotMatrixFont, fontSize = 13.sp)
+            WearBentoIconButton(onClick = { haptics.setIntensity(intensity - 32); intensity = haptics.intensity },
+                modifier = Modifier.size(40.dp), color = CardWhite.copy(alpha = 0.14f), contentColor = CardWhite) {
+                Icon(Icons.Default.Remove, contentDescription = "Lower haptic intensity", modifier = Modifier.size(18.dp))
+            }
+            WearBentoIconButton(onClick = { haptics.setIntensity(intensity + 32); intensity = haptics.intensity },
+                modifier = Modifier.size(40.dp), color = CardWhite.copy(alpha = 0.14f), contentColor = CardWhite) {
+                Icon(Icons.Default.Add, contentDescription = "Raise haptic intensity", modifier = Modifier.size(18.dp))
+            }
+        }
 }
 
 @Composable
@@ -1062,23 +1210,26 @@ private fun DotMatrixActionButton(
     accent: Color,
     onClick: () -> Unit
 ) {
+    var labelSize by remember(label) { mutableFloatStateOf(12f) }
     Button(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(52.dp)
             .border(1.dp, accent, RoundedCornerShape(6.dp)),
         shape = RoundedCornerShape(6.dp),
         colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF151817), contentColor = CardWhite)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
-            Text(label, fontFamily = DotMatrixFont, fontSize = 14.sp, color = CardWhite)
-            Box(Modifier.size(6.dp).background(accent, CircleShape))
+            Text(label, Modifier.weight(1f).padding(start = 6.dp), fontFamily = DotMatrixFont,
+                fontSize = labelSize.sp, color = CardWhite, maxLines = 1, softWrap = false,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                onTextLayout = { if ((it.hasVisualOverflow || it.isLineEllipsized(0)) && labelSize > 10f) labelSize -= 1f })
         }
     }
 }

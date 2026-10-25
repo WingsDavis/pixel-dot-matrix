@@ -11,6 +11,8 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import com.example.core.sync.WearCommandProtocol
+import com.example.core.sync.SyncAppliedAck
 
 class WearSyncService : WearableListenerService() {
 
@@ -22,7 +24,14 @@ class WearSyncService : WearableListenerService() {
         for (event in dataEvents) {
             if (event.type == DataEvent.TYPE_CHANGED) {
                 val item = event.dataItem
-                if (item.uri.path == "/pomodoro/watchface_style") {
+                if (item.uri.path?.startsWith(WearCommandProtocol.ACK_PREFIX) == true) {
+                    val data = DataMapItem.fromDataItem(item).dataMap
+                    val id = item.uri.path!!.removePrefix(WearCommandProtocol.ACK_PREFIX)
+                    val payload = data.getByteArray("payload")
+                    if (data.getInt("schema_version", 0) == WearCommandProtocol.SCHEMA_VERSION &&
+                        data.getString("command_id") == id && payload?.let(SyncAppliedAck::decode)?.id == id
+                    ) payload?.let(::acknowledgeCommand)
+                } else if (item.uri.path == "/pomodoro/watchface_style") {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     val styleId = dataMap.getString("style_id")
                     if (styleId != null) {
@@ -94,11 +103,7 @@ class WearSyncService : WearableListenerService() {
         super.onMessageReceived(messageEvent)
         Log.d(TAG, "Watch background listener received message path: ${messageEvent.path}")
         if (messageEvent.path == PATH_TIMER_COMMAND_ACK) {
-            val commandId = messageEvent.data.toString(Charsets.UTF_8).substringBefore('|')
-            if (commandId.isNotBlank()) {
-                WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this))
-                    .acknowledge(commandId)
-            }
+            acknowledgeCommand(messageEvent.data)
             return
         }
         val envelope = decodeSyncEnvelope(messageEvent.data)
@@ -149,6 +154,12 @@ class WearSyncService : WearableListenerService() {
             acknowledge(it, messageEvent.sourceNodeId, result.isSuccess, result.exceptionOrNull()?.message)
         }
         result.exceptionOrNull()?.let { Log.e(TAG, "Failed to apply ${messageEvent.path}", it) }
+    }
+
+    private fun acknowledgeCommand(payload: ByteArray) {
+        runCatching {
+            WearCommandOutbox(this, Wearable.getNodeClient(this), Wearable.getMessageClient(this)).acknowledge(payload)
+        }.onFailure { Log.e(TAG, "Could not save command acknowledgement", it) }
     }
 
     private fun decodeSyncEnvelope(bytes: ByteArray): SyncEnvelope? {

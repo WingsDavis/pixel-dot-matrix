@@ -331,9 +331,26 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 **Acceptance criteria**
 - [ ] Every action provides immediate visual and haptic acknowledgement.
-- [ ] Offline actions reconcile through the outbox.
-- [ ] No action triggers twice from repeated Data Layer delivery.
-- [ ] Controls fit small and large round Wear displays.
+- [x] Offline actions reconcile through the outbox.
+- [x] No action triggers twice from repeated Data Layer delivery.
+- [x] Controls fit small and large round Wear displays.
+
+**Implementation and verification**
+- The watch journals commands atomically, publishes persistent DataItems, and
+  retains queued/sent/applied/failed receipt states with explicit retry. Legacy
+  queued IDs migrate without silently dropping the original preference data.
+- A protected persisted retry job removes Activity-only replay dependence.
+  The phone runtime applies both durable and message routes through the same
+  authority and returns an applied acknowledgement only after persistence.
+- Quick actions scroll with the crown and expose receipt/failure feedback.
+  Standalone timers keep their existing lease/snapshot reconciliation rather
+  than replaying a new Start on reconnection.
+- The gates pass 138 phone and 91 Wear tests and build all three APKs. Rendered
+  192dp/228dp round layouts and 1.3x text were inspected; actions and retry remain
+  reachable without clipped labels. Tests cover job cancellation, legacy-first
+  capture time, and receipt selection across recreation.
+- Radio reconnect, physical haptic feedback, and system background-policy
+  checks remain pending; see [Watch Quick Actions](docs/WATCH_QUICK_ACTIONS.md).
 
 ### 13. Better Haptic Language `[~]`
 

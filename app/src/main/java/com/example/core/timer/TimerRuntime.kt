@@ -18,6 +18,7 @@ import com.example.core.sync.TimerCommand
 import com.example.core.sync.TimerSnapshotResolver
 import com.example.core.sync.TimerSnapshotStore
 import com.example.core.sync.WearableSyncManager
+import com.example.core.sync.WearCommandProtocol
 import com.example.data.database.AppDatabase
 import com.example.data.entity.FocusTaskEntity
 import com.example.data.entity.IncidentStatus
@@ -65,7 +66,16 @@ class TimerRuntime internal constructor(
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
     private val snapshotStore: TimerSnapshotStore = TimerSnapshotStore(context),
     private val notifyTransition: (TimerTransition, TimerSettings) -> Unit = SessionTransitionNotifier(context.applicationContext)::notify,
-    private val requestTileRefresh: (Context) -> Unit = PomodoroTileService::requestRefresh
+    private val requestTileRefresh: (Context) -> Unit = PomodoroTileService::requestRefresh,
+    private val publishCommandAck: suspend (SyncAppliedAck) -> Unit = { ack ->
+        val request = com.google.android.gms.wearable.PutDataMapRequest.create(WearCommandProtocol.ACK_PREFIX + ack.id).apply {
+            dataMap.putInt("schema_version", WearCommandProtocol.SCHEMA_VERSION)
+            dataMap.putString("command_id", ack.id)
+            dataMap.putByteArray("payload", ack.encode())
+            dataMap.putLong("updated_at", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        Wearable.getDataClient(context.applicationContext).putDataItem(request).await()
+    }
 ) {
     private val context = context.applicationContext
     internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, error ->
@@ -450,7 +460,12 @@ class TimerRuntime internal constructor(
             awaitReady()
             if (path == "/incident/mark") {
                 val command = TimerCommand.decode(payload) ?: return@launch
-                markDistractionFromWear(command.id)
+                val action = command.action.split('|', limit = 2)
+                require(action[0] == "DISTRACTION") { "Unsupported incident action" }
+                val capturedAt = if (action.size == 2) {
+                    action[1].toLongOrNull()?.takeIf { it > 0L } ?: error("Invalid capture time")
+                } else System.currentTimeMillis()
+                markDistractionFromWear(command.id, capturedAt).join()
             } else syncManager.handleMessage(path, sourceNodeId, payload)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
@@ -465,6 +480,10 @@ class TimerRuntime internal constructor(
     fun receiveData(path: String, data: DataMap) = scope.launch {
         try {
             awaitReady()
+            if (path.startsWith(WearCommandProtocol.COMMAND_PREFIX)) {
+                applyDurableCommand(path, data)?.let { publishCommandAck(it) }
+                return@launch
+            }
             commands.withLock {
                 advanceClock()
                 if (syncManager.handleData(path, data)) {
@@ -478,6 +497,36 @@ class TimerRuntime internal constructor(
                 }
             }
         } catch (error: Exception) { if (error is CancellationException) throw error; reportError(error) }
+    }
+
+    internal suspend fun applyDurableCommand(path: String, data: DataMap): SyncAppliedAck? {
+        val id = path.removePrefix(WearCommandProtocol.COMMAND_PREFIX)
+        if (!path.startsWith(WearCommandProtocol.COMMAND_PREFIX) || !WearCommandProtocol.validId(id)) return null
+        return try {
+            awaitReady()
+            require(data.getInt("schema_version", 0) == WearCommandProtocol.SCHEMA_VERSION) { "Unsupported command version" }
+            require(data.getString("command_id") == id) { "Command identity does not match" }
+            val route = data.getString("path")
+            require(route in WearCommandProtocol.paths) { "Unsupported command action" }
+            val command = data.getByteArray("payload")?.let(TimerCommand::decode) ?: error("Invalid command payload")
+            require(command.id == id && command.sourceDevice == "wear") { "Invalid command identity" }
+            when (route) {
+                "/incident/mark" -> {
+                    require(command.action == "DISTRACTION") { "Unsupported incident action" }
+                    require(data.containsKey("created_at") && data.getLong("created_at") >= 0L) { "Invalid capture time" }
+                    val capturedAt = data.getLong("created_at").takeIf { it > 0L } ?: System.currentTimeMillis()
+                    markDistractionFromWear(id, capturedAt).join()
+                    check(database.panicDao().getByIncidentId(id) != null) { "Incident could not be saved" }
+                    SyncAppliedAck(id, true)
+                }
+                "/panic/trigger" -> apply(command.copy(action = "PANIC", baseRevision = -1))
+                "/panic/resolve" -> apply(command.copy(action = "RESOLVE_PANIC", baseRevision = -1))
+                else -> apply(command)
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            SyncAppliedAck(id, false, error.message ?: "Could not apply watch action")
+        }
     }
 
     fun updateTimerSettings(update: (TimerSettings) -> TimerSettings, resetTimer: Boolean): Job {
@@ -598,12 +647,13 @@ class TimerRuntime internal constructor(
 
     fun setSteps(steps: Int) { if (steps > _steps.value) _steps.value = steps }
 
-    fun markDistractionFromWear(id: String) = scope.launch {
+    fun markDistractionFromWear(id: String, capturedAt: Long = System.currentTimeMillis()) = scope.launch {
         val existing = database.panicDao().getByIncidentId(id)
         if (existing != null) { syncManager.sendIncidentStatus(id, existing.incidentStatus); return@launch }
         val incident = PanicLogEntity(incidentId = id, incidentType = "DISTRACTION", sourceDevice = "WEAR",
-            incidentStatus = IncidentStatus.PENDING_DETAIL, resolvedAt = System.currentTimeMillis(), taskName = selectedTask.value?.title)
-        if (repository.insertIncidentIfAbsent(incident) != -1L) activeIncidentAudit.value = incident
+            timestamp = capturedAt, incidentStatus = IncidentStatus.PENDING_DETAIL,
+            resolvedAt = maxOf(System.currentTimeMillis(), capturedAt), taskName = selectedTask.value?.title)
+        if (repository.insertIncidentIfAbsent(incident) != -1L) activeIncidentAudit.value = database.panicDao().getByIncidentId(id)
         syncManager.sendIncidentStatus(id, IncidentStatus.PENDING_DETAIL)
     }
 

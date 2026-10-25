@@ -15,6 +15,8 @@ import com.example.core.sync.TimerAuthority
 import com.example.core.sync.TimerCommand
 import com.example.core.sync.TimerSnapshot
 import com.example.core.sync.TimerSnapshotStore
+import com.example.core.sync.WearCommandProtocol
+import com.google.android.gms.wearable.DataMap
 import com.example.data.database.AppDatabase
 import com.example.data.entity.FocusTaskEntity
 import com.example.data.entity.IncidentStatus
@@ -71,17 +73,101 @@ class TimerRuntimeTest {
     private suspend fun create(
         settings: TimerSettings = TimerSettings(transitionSoundEnabled = false, transitionHapticEnabled = false),
         store: TimerSnapshotStore = TimerSnapshotStore(context),
-        startHost: (Context) -> Unit = {}
+        startHost: (Context) -> Unit = {},
+        acknowledgement: suspend (com.example.core.sync.SyncAppliedAck) -> Unit = {}
     ): TimerRuntime {
         TimerSettingsStore(context).write(settings)
         DailyFocusGoalStore(context).save(DailyFocusGoalSettings(enabled = true))
         return TimerRuntime(context, database, startHost, { elapsed }, store,
-            { transition, _ -> alerts += transition }, { tileRefreshes++ }).also {
+            { transition, _ -> alerts += transition }, { tileRefreshes++ }, acknowledgement).also {
             runtime = it
             TimerRuntime.installForTest(it)
             it.awaitReady()
             withContext(Dispatchers.Main.immediate) { }
         }
+    }
+
+    @Test
+    fun persistentWatchCommandUsesTheSameAuthorityAndPublishesOnlyAppliedAck() = runRuntimeTest {
+        val acknowledgements = mutableListOf<com.example.core.sync.SyncAppliedAck>()
+        val timer = create(acknowledgement = { acknowledgements += it })
+        val data = DataMap().apply {
+            putInt("schema_version", 1)
+            putString("command_id", "queued-start")
+            putString("path", "/pomodoro/control")
+            putByteArray("payload", TimerCommand(id = "queued-start", action = "START", baseRevision = -1).encode())
+            putLong("created_at", System.currentTimeMillis())
+        }
+        timer.receiveData(WearCommandProtocol.COMMAND_PREFIX + "queued-start", data).join()
+        timer.receiveData(WearCommandProtocol.COMMAND_PREFIX + "queued-start", data).join()
+        assertTrue(timer.engine.isRunning.value)
+        assertEquals(listOf(true, true), acknowledgements.map { it.applied })
+        assertTrue(TimerSnapshotStore(context).wasCommandApplied("queued-start"))
+        data.putInt("schema_version", 2)
+        timer.receiveData(WearCommandProtocol.COMMAND_PREFIX + "queued-start", data).join()
+        assertFalse(acknowledgements.last().applied)
+        timer.close()
+    }
+
+    @Test
+    fun durableDistractionKeepsCaptureTimeAndReloadsEditableRowIdentity() = runRuntimeTest {
+        val timer = create()
+        val captured = System.currentTimeMillis() - 120_000
+        val data = DataMap().apply {
+            putInt("schema_version", 1)
+            putString("command_id", "queued-distraction")
+            putString("path", "/incident/mark")
+            putByteArray("payload", TimerCommand(id = "queued-distraction", action = "DISTRACTION", baseRevision = -1).encode())
+            putLong("created_at", captured)
+        }
+        assertTrue(timer.applyDurableCommand(WearCommandProtocol.COMMAND_PREFIX + "queued-distraction", data)!!.applied)
+        val stored = timer.activeIncidentAudit.value!!
+        assertTrue(stored.id > 0)
+        assertEquals(captured, stored.timestamp)
+        database.panicDao().updatePanicLog(stored.copy(forensicNotes = "Captured detail", incidentStatus = IncidentStatus.CLOSED))
+        assertEquals("Captured detail", database.panicDao().getByIncidentId(stored.incidentId)?.forensicNotes)
+        assertTrue(timer.applyDurableCommand(WearCommandProtocol.COMMAND_PREFIX + "queued-distraction", data)!!.applied)
+        assertEquals(1, database.panicDao().getAllPanicLogs().first().size)
+        assertEquals(IncidentStatus.CLOSED, database.panicDao().getByIncidentId(stored.incidentId)?.incidentStatus)
+        timer.close()
+    }
+
+    @Test
+    fun legacyFirstDistractionRetainsItsCaptureTimeWhenDurableCopyArrives() = runRuntimeTest {
+        val timer = create()
+        val captured = System.currentTimeMillis() - 3_600_000
+        val id = "legacy-first-distraction"
+        timer.receiveMessage("/incident/mark", "watch", TimerCommand(id = id,
+            action = "DISTRACTION|$captured", baseRevision = -1).encode()).join()
+        assertEquals(captured, database.panicDao().getByIncidentId(id)!!.timestamp)
+        val durable = DataMap().apply {
+            putInt("schema_version", 1); putString("command_id", id)
+            putString("path", "/incident/mark"); putLong("created_at", captured)
+            putByteArray("payload", TimerCommand(id = id, action = "DISTRACTION", baseRevision = -1).encode())
+        }
+        assertTrue(timer.applyDurableCommand(WearCommandProtocol.COMMAND_PREFIX + id, durable)!!.applied)
+        assertEquals(captured, database.panicDao().getByIncidentId(id)!!.timestamp)
+        assertEquals(1, database.panicDao().snapshot().size)
+        timer.close()
+    }
+
+    @Test
+    fun failedDurableCommandDoesNotClaimAnAppliedReceipt() = runRuntimeTest {
+        val timer = create(startHost = { error("Foreground start denied") })
+        val data = DataMap().apply {
+            putInt("schema_version", 1)
+            putString("command_id", "denied-start")
+            putString("path", "/pomodoro/control")
+            putByteArray("payload", TimerCommand(id = "denied-start", action = "START", baseRevision = -1).encode())
+        }
+        val result = timer.applyDurableCommand(WearCommandProtocol.COMMAND_PREFIX + "denied-start", data)!!
+        assertFalse(result.applied)
+        assertEquals("Foreground start denied", result.message)
+        assertFalse(timer.engine.isRunning.value)
+        assertFalse(TimerSnapshotStore(context).wasCommandApplied("denied-start"))
+        data.putString("command_id", "different")
+        assertFalse(timer.applyDurableCommand(WearCommandProtocol.COMMAND_PREFIX + "denied-start", data)!!.applied)
+        timer.close()
     }
 
     @Test

@@ -343,6 +343,25 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   recorded in `docs/COMPLICATIONS.md`; on-device binding, rendering, and tap
   verification remain pending rather than being inferred from compilation.
 
+### Watch Quick Actions (Roadmap Item 12)
+
+- Timer commands and applied acknowledgements share one codec between phone and
+  Wear. Existing `v2` messages remain compatible; durable command/acknowledgement
+  DataItems add schema/identity validation and process-independent delivery.
+- The Wear outbox uses an atomic journal, shared-instance locking, bounded
+  capacity/backoff, explicit failed-action retry, and retained applied receipts.
+  Its protected persisted job supplies background recovery without an Activity
+  or a new foreground polling service.
+- The phone runtime confirms durable effects after persistence. Distractions
+  preserve capture time and reload their saved primary key before editing;
+  repeated delivery cannot replace completed detail with a fresh pending row.
+- The dot-matrix controls scroll on round displays, announce receipt changes,
+  and separate local save, sent, applied, failed, and standalone feedback. Crown
+  input scrolls the action list before moving to another page.
+- Automated evidence and remaining physical checks are documented in
+  `docs/WATCH_QUICK_ACTIONS.md`. The watch is unavailable for radio/haptic and
+  system background-policy evaluation in this pass.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

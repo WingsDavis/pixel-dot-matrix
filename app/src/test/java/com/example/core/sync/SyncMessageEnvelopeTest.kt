@@ -4,7 +4,12 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24])
 class SyncMessageEnvelopeTest {
     @Test
     fun preservesIdAndPayloadIncludingNewlines() {
@@ -28,5 +33,11 @@ class SyncMessageEnvelopeTest {
     @Test
     fun legacyAcknowledgementMeansApplied() {
         assertEquals(SyncAppliedAck("item-3", true), SyncAppliedAck.decode("item-3".toByteArray()))
+    }
+
+    @Test fun unsupportedAndMalformedAcknowledgementsAreNotApplied() {
+        listOf("item-3|UNKNOWN|", "item-3|APPLIED|%%%x", "|APPLIED|", "bad/id|APPLIED|").forEach {
+            assertNull(SyncAppliedAck.decode(it.toByteArray()))
+        }
     }
 }
