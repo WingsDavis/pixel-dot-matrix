@@ -2,6 +2,7 @@ package com.example.wear
 
 import android.content.Intent
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -15,9 +16,6 @@ import com.example.core.sync.WearCommandProtocol
 import com.example.core.sync.SyncAppliedAck
 
 class WearSyncService : WearableListenerService() {
-
-    private var lastPanicLaunchElapsed = 0L
-    private var lastFrustrationLaunchElapsed = 0L
 
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         super.onDataChanged(dataEvents)
@@ -128,20 +126,20 @@ class WearSyncService : WearableListenerService() {
                         .commit()
                     ComplicationUpdates.text(this)
                 }
-                "/panic/trigger" -> if (!shouldSkipLaunch(lastPanicLaunchElapsed)) {
-                    lastPanicLaunchElapsed = SystemClock.elapsedRealtime()
+                "/panic/trigger" -> dispatchAlert("panic", envelope?.id) { token ->
                     val intent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("FORCE_PANIC_UI", true)
+                        putExtra(WearAlertAcceptance.EXTRA_TOKEN, token)
                     }
                     startActivity(intent)
                     Log.d(TAG, "Successfully started Wear MainActivity to trigger active intervention.")
                 }
-                "/panic/frustration" -> if (!shouldSkipLaunch(lastFrustrationLaunchElapsed)) {
-                    lastFrustrationLaunchElapsed = SystemClock.elapsedRealtime()
+                "/panic/frustration" -> dispatchAlert("frustration", envelope?.id) { token ->
                     val intent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("TRIGGER_FRUSTRATION", true)
+                        putExtra(WearAlertAcceptance.EXTRA_TOKEN, token)
                     }
                     startActivity(intent)
                     Log.d(TAG, "Successfully started Wear MainActivity for Frustration Interception.")
@@ -150,7 +148,8 @@ class WearSyncService : WearableListenerService() {
             }
         }
         if (result.isSuccess && envelope != null) rememberAppliedEnvelope(envelope.id)
-        envelope?.let {
+        // A blocked Activity launch is transient; no applied/terminal receipt means the phone retries.
+        envelope?.takeUnless { result.isFailure && messageEvent.path in setOf("/panic/trigger", "/panic/frustration") }?.let {
             acknowledge(it, messageEvent.sourceNodeId, result.isSuccess, result.exceptionOrNull()?.message)
         }
         result.exceptionOrNull()?.let { Log.e(TAG, "Failed to apply ${messageEvent.path}", it) }
@@ -291,8 +290,34 @@ class WearSyncService : WearableListenerService() {
             }
     }
 
-    private fun shouldSkipLaunch(lastLaunchElapsed: Long): Boolean {
-        return SystemClock.elapsedRealtime() - lastLaunchElapsed < LAUNCH_DEBOUNCE_MS
+    internal fun dispatchAlert(
+        kind: String,
+        eventId: String?,
+        nowElapsedMs: Long = SystemClock.elapsedRealtime(),
+        bootCount: Int = runCatching { Settings.Global.getInt(contentResolver, Settings.Global.BOOT_COUNT, 0) }.getOrDefault(0),
+        acknowledgementTimeoutMs: Long = 5_000L,
+        launch: (String) -> Unit
+    ): Boolean {
+        require(kind in setOf("panic", "frustration"))
+        val preferences = getSharedPreferences("wear_alert_dispatch", MODE_PRIVATE)
+        synchronized(preferences) {
+            val last = preferences.getLong("${kind}_elapsed", -1)
+            val duplicate = if (eventId != null) preferences.getString("${kind}_id", null) == eventId else {
+                preferences.getInt("${kind}_boot", -1) == bootCount && last >= 0 &&
+                    nowElapsedMs >= last && nowElapsedMs - last < LAUNCH_DEBOUNCE_MS
+            }
+            if (duplicate) return false
+            val token = WearAlertAcceptance.prepare(acknowledgementTimeoutMs)
+            try {
+                launch(token)
+                check(WearAlertAcceptance.await(token, acknowledgementTimeoutMs)) { "Watch app did not accept the alert" }
+            } finally { WearAlertAcceptance.release(token) }
+            check(preferences.edit().putString("${kind}_id", eventId)
+                .putLong("${kind}_elapsed", nowElapsedMs).putInt("${kind}_boot", bootCount).commit()) {
+                "Could not remember alert delivery"
+            }
+            return true
+        }
     }
 
     companion object {

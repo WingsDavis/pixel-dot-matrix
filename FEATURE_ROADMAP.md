@@ -365,9 +365,27 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 
 **Acceptance criteria**
 - [ ] Patterns are perceptibly distinct on the Pixel Watch.
-- [ ] Preferences persist and apply without restart.
+- [x] Preferences persist and apply without restart.
 - [ ] Ambient/background restrictions are handled without crashes.
-- [ ] Duplicate messages cannot replay alerts within the debounce window.
+- [x] Duplicate messages cannot replay alerts within the debounce window.
+
+**Implementation and verification**
+- Named cues now distinguish completed focus, short/long break, recovery,
+  warning, panic, success, and failure. The dispatcher shares live preferences,
+  intensity ceilings, capability-aware tick fallback, and cross-instance
+  debounce. Repeated high-frequency cues do not write preferences per tick.
+- Recovery and component press feedback use the dispatcher instead of bypassing
+  user settings. Panic pulses stop during recovery and all ongoing feedback
+  stops when the Activity leaves the foreground.
+- Alert messages enter through the background service only; successful alert
+  launches are remembered across service recreation. Named phase/warning and
+  command-result events carry stable identifiers.
+- The Wear suite covers 123 automated checks, including live settings controls,
+  capability fallbacks, disabled/background suppression, silent launch failure,
+  loop replacement, and one-shot cue preservation. Timer restart tests cover
+  fresh warning identifiers without changing pause/resume identifiers.
+- Physical pattern distinction, ambient restrictions, and calibration remain
+  pending because the watch is unavailable; see [Haptics](docs/HAPTICS.md).
 
 ### 14. Ambient Safeguards `[ ]`
 

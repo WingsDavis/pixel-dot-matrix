@@ -87,6 +87,23 @@ class TimerRuntimeTest {
         }
     }
 
+    @Test fun restartingTheSamePhaseGetsANewWarningSessionButPauseResumeAndDuplicatesDoNot() = runRuntimeTest {
+        val store = TimerSnapshotStore(context)
+        val timer = create(store = store)
+        val initial = timer.syncManager.currentTimerSnapshot().sessionId
+        val restart = TimerCommand(id = "restart-focus", action = "START_FOCUS", baseRevision = -1, sourceDevice = "phone")
+        assertTrue(timer.apply(restart).applied)
+        val restarted = store.load()!!.sessionId
+        assertNotEquals(initial, restarted)
+        assertTrue(timer.apply(restart).applied)
+        assertEquals(restarted, store.load()!!.sessionId)
+        timer.apply(TimerCommand(action = "PAUSE", baseRevision = -1, sourceDevice = "phone"))
+        timer.apply(TimerCommand(action = "START", baseRevision = -1, sourceDevice = "phone"))
+        assertEquals(restarted, store.load()!!.sessionId)
+        timer.apply(TimerCommand(action = "RESET", baseRevision = -1, sourceDevice = "phone"))
+        assertNotEquals(restarted, store.load()!!.sessionId)
+    }
+
     @Test
     fun persistentWatchCommandUsesTheSameAuthorityAndPublishesOnlyAppliedAck() = runRuntimeTest {
         val acknowledgements = mutableListOf<com.example.core.sync.SyncAppliedAck>()

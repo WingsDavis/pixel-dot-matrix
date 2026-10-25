@@ -362,6 +362,20 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   `docs/WATCH_QUICK_ACTIONS.md`. The watch is unavailable for radio/haptic and
   system background-policy evaluation in this pass.
 
+### Haptic Language (Roadmap Item 13)
+
+- `WearHaptics` centralizes named patterns, live enable/intensity settings,
+  foreground/capability guards, and shared debounce. Recovery cues and component
+  presses no longer bypass those preferences.
+- Main uses phase-specific cues and stable event IDs. The local countdown emits
+  the five-minute warning even when no Data Layer update is needed. Ongoing
+  panic/frustration feedback stops on Activity stop and is quiet during recovery.
+- Only the background listener handles alert messages. Boot-aware remembered
+  launches avoid replay after listener recreation; failed launches remain
+  retryable. Phone action receipts remain separate from vibration feedback.
+- Physical strength, pattern distinction, and ambient hardware evaluation are
+  pending. Automated evidence is recorded in `docs/HAPTICS.md`.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

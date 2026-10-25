@@ -103,6 +103,25 @@ class WearQuickActionsScreenTest {
         assertNull(recreated.selected(records.filterNot { it.id == "older" }, false))
     }
 
+    @Test fun hapticControlsObserveOtherInstancesAndButtonPressIsNotConsumed() {
+        show(192, 1.3f, "", "", null)
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val external = WearHaptics(context)
+        compose.runOnIdle {
+            assertTrue(external.setEnabled(false))
+            assertTrue(external.setIntensity(96))
+        }
+        scrollTo("HAPTICS")
+        compose.onNodeWithText("HAPTICS").assertIsOff()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasContentDescription("Raise haptic intensity"))
+        compose.onNodeWithContentDescription("Raise haptic intensity").performClick()
+        compose.onNodeWithText("128").assertIsDisplayed()
+        assertEquals(128, external.intensity)
+        compose.runOnIdle { assertTrue(external.setEnabled(true)) }
+        scrollTo("HAPTICS")
+        compose.onNodeWithText("HAPTICS").assertIsOn()
+    }
+
     private var distractions = 0
     private var focus = 0
     private var breaks = 0

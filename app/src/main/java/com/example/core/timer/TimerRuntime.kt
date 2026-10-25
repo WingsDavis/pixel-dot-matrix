@@ -146,6 +146,7 @@ class TimerRuntime internal constructor(
                 stored.activeFocusInterval != restored.activeFocusInterval)) {
                 snapshotStore.save(stored.copy(
                     revision = stored.revision + 1, state = restored.state,
+                    sessionId = if (restored.transitions.isNotEmpty()) java.util.UUID.randomUUID().toString() else stored.sessionId,
                     secondsRemaining = restored.secondsRemaining, isRunning = restored.isRunning,
                     updatedAtEpochMs = System.currentTimeMillis(), anchorElapsedRealtimeMs = elapsedRealtime(),
                     completedFocusSessions = restored.completedFocusSessions, activeFocusInterval = restored.activeFocusInterval
@@ -322,6 +323,7 @@ class TimerRuntime internal constructor(
         if (elapsed == 0) return@withContext
         val nextElapsedAnchor = elapsedAnchor + elapsed * 1_000L
         val nextWallAnchor = wallAnchor + elapsed * 1_000L
+        var newSession = false
         if (engine.isRunning.value) {
             captureActiveTask()
             val before = syncManager.currentTimerSnapshot()
@@ -337,6 +339,7 @@ class TimerRuntime internal constructor(
                 snapshotStore.removePendingFocusInterval(interval.id)
             }
             timer.transitions.lastOrNull()?.let { notifyTransition(it, _timerSettings.value) }
+            newSession = timer.transitions.isNotEmpty()
             engine.restore(timer)
             captureActiveTask()
             activeFocus.value = engine.activeFocusInterval.value
@@ -344,7 +347,7 @@ class TimerRuntime internal constructor(
         elapsedAnchor = nextElapsedAnchor
         wallAnchor = nextWallAnchor
         goalClock.value = System.currentTimeMillis()
-        syncManager.pushStateToWearable()
+        syncManager.pushStateToWearable(newSession = newSession)
     }
 
     private fun tick() {
@@ -396,7 +399,8 @@ class TimerRuntime internal constructor(
                 }
                 captureActiveTask()
                 resetClockAnchor()
-                syncManager.pushStateToWearable(force = true, commandId = command.id)
+                syncManager.pushStateToWearable(force = true, commandId = command.id,
+                    newSession = action in setOf("RESET", "START_FOCUS", "START_SHORT_BREAK", "START_LONG_BREAK"))
                 pruneTaskMetadata()
                 _error.value = null
                 requestTileRefresh(context)
@@ -541,7 +545,7 @@ class TimerRuntime internal constructor(
                 engine.applySettings(safe, resetTimer)
                 resetClockAnchor()
                 timerSettingsUpdates.trySend(generation to safe)
-                runCatching { syncManager.pushStateToWearable(force = true) }.onFailure(::reportError)
+                runCatching { syncManager.pushStateToWearable(force = true, newSession = resetTimer) }.onFailure(::reportError)
             }
         }
     }
@@ -615,7 +619,7 @@ class TimerRuntime internal constructor(
             }
             engine.syncState(state, duration, false)
             resetClockAnchor()
-            runCatching { syncManager.pushStateToWearable(force = true) }.onFailure(::reportError)
+            runCatching { syncManager.pushStateToWearable(force = true, newSession = true) }.onFailure(::reportError)
         }
     }
 

@@ -82,6 +82,7 @@ See [Architecture](docs/ARCHITECTURE.md),
 [Quick Settings Timer](docs/QUICK_SETTINGS.md),
 [Complications](docs/COMPLICATIONS.md),
 [Watch Quick Actions](docs/WATCH_QUICK_ACTIONS.md),
+[Haptic Language](docs/HAPTICS.md),
 [Implementation Guide](IMPLEMENTATION.md), and
 [Feature Roadmap](FEATURE_ROADMAP.md) for detailed design and progress.
 

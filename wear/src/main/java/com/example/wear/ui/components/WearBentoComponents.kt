@@ -1,12 +1,12 @@
 package com.example.wear.ui.components
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -21,9 +21,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
+import com.example.wear.WearHapticPattern
+import com.example.wear.WearHaptics
 import com.example.wear.ui.theme.CardBlack
 import com.example.wear.ui.theme.CardWhite
 
@@ -39,20 +42,22 @@ fun Modifier.bounceClick(
         ),
         label = "BounceClick"
     )
-    val view = LocalView.current
+    val context = LocalContext.current
+    val haptics = remember(context) { WearHaptics(context) }
 
     this
         .scale(scale)
-        .pointerInput(isPressed) {
-            awaitPointerEventScope {
-                isPressed = if (awaitFirstDown(requireUnconsumed = false).also { it.consume() } != null) {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                    true
-                } else {
-                    false
+        .pointerInput(haptics) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                isPressed = true
+                try {
+                    if (waitForUpOrCancellation(pass = PointerEventPass.Initial) != null) {
+                        haptics.play(WearHapticPattern.NAVIGATION_TICK)
+                    }
+                } finally {
+                    isPressed = false
                 }
-                waitForUpOrCancellation()
-                isPressed = false
             }
         }
 }

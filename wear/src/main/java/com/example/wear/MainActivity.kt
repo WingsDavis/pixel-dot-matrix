@@ -10,11 +10,8 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.util.Log
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.*
@@ -73,7 +70,7 @@ import com.example.core.sync.SyncAppliedAck
 import com.example.core.sync.WearCommandProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
 
-class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener, SensorEventListener {
+class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, SensorEventListener {
 
     private val dataClient by lazy { Wearable.getDataClient(this) }
     private val messageClient by lazy { Wearable.getMessageClient(this) }
@@ -114,9 +111,13 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private val _heartRateThreshold = mutableStateOf(130f)
     private val _stepsTakenInPanic = mutableStateOf(0)
     private val _isFrustrated = mutableStateOf(false)
+    private val isVisible = mutableStateOf(false)
+    private val visibilityGeneration = mutableIntStateOf(0)
+    private val inRecovery = mutableStateOf(false)
+    private val recoveryQuiet = mutableStateOf(false)
 
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var vibratorJob: Job? = null
+    private val alertLoop by lazy { WearHapticLoop(activityScope, wearHaptics::cancel) }
 
     private lateinit var sensorManager: SensorManager
     private var heartRateSensor: Sensor? = null
@@ -139,20 +140,15 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             }
         }
 
-        val triggerFrustration = intent.getBooleanExtra("TRIGGER_FRUSTRATION", false)
-        if (triggerFrustration) {
-            _isFrustrated.value = true
-        }
-
         val userTriggeredPanic = intent.getBooleanExtra("TRIGGER_PANIC", false) ||
             intent.data?.host == "trigger"
-        val remotePanicUi = intent.getBooleanExtra("FORCE_PANIC_UI", false)
-        if (userTriggeredPanic || remotePanicUi) {
+        if (userTriggeredPanic) {
             _stateName.value = "PANIC_MODE"
         }
         if (userTriggeredPanic) {
             triggerPanicOnPhone()
         }
+        applyAlertIntent(intent)
 
         setContent {
             WearAppTheme {
@@ -165,6 +161,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 val heartRateThreshold by _heartRateThreshold
                 val stepsTakenInPanic by _stepsTakenInPanic
                 val isFrustrated by _isFrustrated
+                val hapticSettings by wearHaptics.settings.collectAsState()
                 val commandRecords by (commandOutboxResult.getOrNull()?.records ?: emptyCommandRecords).collectAsState()
                 val selectedCommand = actionSelection.selected(commandRecords, localActionFeedback.value != null)
                 val feedback = if (localActionFeedback.value?.error != null) localActionFeedback.value else {
@@ -177,10 +174,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         when (selectedCommand.status) {
                             WearCommandStatus.APPLIED -> {
                                 localActionFeedback.value = null
-                                wearHaptics.play(WearHapticPattern.SUCCESS)
+                                wearHaptics.play(WearHapticPattern.SUCCESS, eventId = "${selectedCommand.id}:APPLIED")
                             }
                             WearCommandStatus.FAILED -> if (localActionFeedback.value?.title != "RETRYING") {
-                                wearHaptics.play(WearHapticPattern.FAILURE)
+                                wearHaptics.play(WearHapticPattern.FAILURE, eventId = "${selectedCommand.id}:FAILED")
                             }
                             else -> Unit
                         }
@@ -192,7 +189,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         delay(1_000L)
                         if (_isRunning.value) {
                             val previousPhase = _stateName.value
+                            val previousRemaining = _secondsRemaining.value
                             _secondsRemaining.value = (_secondsRemaining.value - 1).coerceAtLeast(0)
+                            if (previousPhase == "FOCUS" && previousRemaining > 300 && _secondsRemaining.value == 300) {
+                                wearHaptics.play(WearHapticPattern.FIVE_MINUTE_WARNING, eventId = "$timerSessionId:300")
+                            }
                             if (_secondsRemaining.value == 0) {
                                 if (hasWearAuthority) completeStandaloneInterval() else _isRunning.value = false
                             }
@@ -212,10 +213,12 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     }
                 }
 
-                // Manage haptic feedback loop in PANIC_MODE or Frustrated Mode
-                LaunchedEffect(stateName, isFrustrated) {
-                    if (stateName == "PANIC_MODE") {
-                        // Wake up the screen and keep it on indefinitely
+                LaunchedEffect(stateName, isFrustrated, isVisible.value, visibilityGeneration.intValue, recoveryQuiet.value, hapticSettings.enabled) {
+                    if (stateName != "PANIC_MODE") {
+                        recoveryQuiet.value = false
+                        inRecovery.value = false
+                    }
+                    if (stateName == "PANIC_MODE" && isVisible.value) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                             setShowWhenLocked(true)
                             setTurnScreenOn(true)
@@ -225,25 +228,26 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                         }
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-                        startEscalatingVibrator()
                         if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
                             stepDetectorSensor?.let {
                                 sensorManager.registerListener(this@MainActivity, it, SensorManager.SENSOR_DELAY_UI)
                             }
                         }
-                    } else if (isFrustrated) {
-                        startFrustrationVibrator()
-                        stepDetectorSensor?.let { sensorManager.unregisterListener(this@MainActivity, it) }
                     } else {
-                        // Allow screen to turn off normally again
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                             setShowWhenLocked(false)
                             setTurnScreenOn(false)
                         }
                         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-                        stopVibrator()
                         stepDetectorSensor?.let { sensorManager.unregisterListener(this@MainActivity, it) }
+                    }
+                    when {
+                        !isVisible.value || !hapticSettings.enabled -> stopVibrator()
+                        recoveryQuiet.value -> alertLoop.stop()
+                        stateName == "PANIC_MODE" -> startEscalatingVibrator()
+                        isFrustrated -> startFrustrationVibrator()
+                        else -> alertLoop.stop()
                     }
                 }
 
@@ -365,11 +369,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                                 contentAlignment = Alignment.Center
                              ) {
                                 if (stateName == "PANIC_MODE") {
-                                    var inRecovery by remember { mutableStateOf(false) }
-                                    if (inRecovery) {
+                                    if (inRecovery.value) {
                                         com.example.wear.ui.screens.RecoveryScreen(
                                             onRecoveryComplete = {
-                                                inRecovery = false
+                                                inRecovery.value = false
                                                 resolvePanicOnPhone()
                                             }
                                         )
@@ -378,7 +381,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                                             modifier = Modifier.size(110.dp),
                                             color = TealAccent,
                                             shape = CircleShape,
-                                            onClick = { inRecovery = true }
+                                            onClick = {
+                                                stopVibrator()
+                                                recoveryQuiet.value = true
+                                                inRecovery.value = true
+                                            }
                                         ) {
                                             Box(
                                                 modifier = Modifier.fillMaxSize(),
@@ -454,7 +461,6 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
         // Register wearable listeners
         dataClient.addListener(this)
-        messageClient.addListener(this)
         activityScope.launch(Dispatchers.IO) {
             while (isActive) {
                 withContext(Dispatchers.Main) { _dailyFocusProgress.value = WearDailyFocusGoal.read(this@MainActivity) }
@@ -471,7 +477,6 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     override fun onDestroy() {
         super.onDestroy()
         dataClient.removeListener(this)
-        messageClient.removeListener(this)
         sensorManager.unregisterListener(this)
         activityScope.cancel()
         stopVibrator()
@@ -480,6 +485,17 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     override fun onSaveInstanceState(outState: Bundle) {
         actionSelection.save(outState)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        visibilityGeneration.intValue++
+        isVisible.value = true
+    }
+    override fun onStop() {
+        isVisible.value = false
+        stopVibrator()
+        super.onStop()
     }
 
     // --- Bidirectional Wearable Communication ---
@@ -598,7 +614,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             "START_SHORT_BREAK" -> setStandalonePhase("SHORT_BREAK", shortBreakDuration, true)
             "START_LONG_BREAK" -> setStandalonePhase("LONG_BREAK", longBreakDuration, true)
         }
-        if (previousState != _stateName.value) timerSessionId = UUID.randomUUID().toString()
+        if (previousState != _stateName.value || action in setOf("RESET", "START_FOCUS", "START_SHORT_BREAK", "START_LONG_BREAK")) {
+            timerSessionId = UUID.randomUUID().toString()
+        }
         hasWearAuthority = true
         timerUpdatedAtEpochMs = System.currentTimeMillis()
         wearLeaseExpiresAtEpochMs = timerUpdatedAtEpochMs + WEAR_AUTHORITY_LEASE_MS
@@ -639,12 +657,17 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         super.onNewIntent(intent)
         setIntent(intent)
         navigateFromComplication(intent)
-        if (intent.getBooleanExtra("TRIGGER_FRUSTRATION", false)) {
-            _isFrustrated.value = true
+        applyAlertIntent(intent)
+    }
+
+    private fun applyAlertIntent(intent: android.content.Intent) {
+        val apply = {
+            if (intent.getBooleanExtra("TRIGGER_FRUSTRATION", false)) _isFrustrated.value = true
+            if (intent.getBooleanExtra("FORCE_PANIC_UI", false)) _stateName.value = "PANIC_MODE"
         }
-        if (intent.getBooleanExtra("FORCE_PANIC_UI", false)) {
-            _stateName.value = "PANIC_MODE"
-        }
+        if (intent.hasExtra(WearAlertAcceptance.EXTRA_TOKEN)) {
+            WearAlertAcceptance.accept(intent.getStringExtra(WearAlertAcceptance.EXTRA_TOKEN), apply)
+        } else apply()
     }
 
     private fun navigateFromComplication(intent: android.content.Intent) {
@@ -667,22 +690,25 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     val newState = if (isPanic || newStateRaw == "PANIC_MODE") "PANIC_MODE" else newStateRaw
                     if (newState !in setOf("FOCUS", "SHORT_BREAK", "LONG_BREAK", "PANIC_MODE")) continue
 
-                    // State Transition Haptic (Wave)
-                    if (newState != _stateName.value && newState != "PANIC_MODE" && _stateName.value != "PANIC_MODE") {
-                        triggerWaveHaptic()
-                    }
-                    _stateName.value = newState
-
                     val newSeconds = dataMap.getInt("seconds_remaining").coerceIn(0, 86_400)
-                    // 5-minute warning Haptic (Double Tap)
-                    if (newState == "FOCUS" && _secondsRemaining.value > 300 && newSeconds <= 300) {
-                        triggerDoubleTapHaptic()
-                    }
                     val updatedAt = dataMap.getLong("timestamp", System.currentTimeMillis())
                     val elapsedSeconds = if (dataMap.getBoolean("is_running")) {
                         ((System.currentTimeMillis() - updatedAt).coerceAtLeast(0L) / 1_000L).coerceAtMost(newSeconds.toLong())
                     } else 0L
                     val reconciledSeconds = newSeconds - elapsedSeconds.toInt()
+                    val eventId = dataMap.getString("session_id") ?: incomingRevision.toString()
+                    if (newState != _stateName.value && newState != "PANIC_MODE" && _stateName.value != "PANIC_MODE") {
+                        alertLoop.stop()
+                        wearHaptics.play(WearHaptics.transitionPattern(_stateName.value, newState, dataMap.getBoolean("is_running")),
+                            eventId = "$eventId:$newState")
+                    }
+                    if (newState == "FOCUS" && _stateName.value == "FOCUS" &&
+                        dataMap.getBoolean("is_running") && eventId == timerSessionId &&
+                        _secondsRemaining.value > 300 && reconciledSeconds in 1..300) {
+                        wearHaptics.play(WearHapticPattern.FIVE_MINUTE_WARNING, eventId = "$eventId:300")
+                    }
+                    if (newState != "FOCUS") _isFrustrated.value = false
+                    _stateName.value = newState
                     _secondsRemaining.value = reconciledSeconds
                     _isRunning.value = dataMap.getBoolean("is_running")
                     timerRevision = incomingRevision
@@ -798,6 +824,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     }
 
     private fun completeStandaloneInterval(playHaptic: Boolean = true) {
+        val previousState = _stateName.value
         when (_stateName.value) {
             "FOCUS" -> {
                 completedFocusSessions++
@@ -812,7 +839,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             else -> _isRunning.value = false
         }
         timerSessionId = UUID.randomUUID().toString()
-        if (playHaptic) wearHaptics.play(WearHapticPattern.TRANSITION)
+        alertLoop.stop()
+        _isFrustrated.value = false
+        if (playHaptic) wearHaptics.play(WearHaptics.transitionPattern(previousState, _stateName.value, _isRunning.value),
+            eventId = "$timerSessionId:${_stateName.value}")
     }
 
     private fun hasHeartRatePermission(): Boolean {
@@ -829,42 +859,6 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         return hasBodySensors && hasReadHeartRate
     }
 
-    private fun triggerWaveHaptic() {
-        wearHaptics.play(WearHapticPattern.TRANSITION)
-    }
-
-    private fun triggerDoubleTapHaptic() {
-        wearHaptics.play(WearHapticPattern.FIVE_MINUTE_WARNING)
-    }
-
-    override fun onMessageReceived(messageEvent: MessageEvent) {
-        Log.d(TAG, "Watch received message: ${messageEvent.path}")
-        when (messageEvent.path) {
-            "/pomodoro/control_ack" -> {
-                acknowledgeWatchAction(messageEvent.data)
-            }
-            "/panic/trigger" -> {
-                _stateName.value = "PANIC_MODE"
-                saveStateToPrefs("PANIC_MODE", _secondsRemaining.value, _isRunning.value)
-            }
-            "/panic/resolve" -> {
-                _stateName.value = "FOCUS"
-                _stepsTakenInPanic.value = 0
-                saveStateToPrefs("FOCUS", _secondsRemaining.value, _isRunning.value)
-            }
-            "/pomodoro/custom_text" -> {
-                val customText = String(decodeSyncPayload(messageEvent.data))
-                getSharedPreferences("pomodoro_sync_prefs", Context.MODE_PRIVATE).edit()
-                    .putString("custom_text", customText)
-                    .apply()
-                ComplicationUpdates.text(this)
-            }
-            "/panic/frustration" -> {
-                _isFrustrated.value = true
-            }
-        }
-    }
-
     private fun acknowledgeWatchAction(payload: ByteArray) {
         val copy = payload.copyOf()
         activityScope.launch(Dispatchers.IO) {
@@ -873,19 +867,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         }
     }
 
-    private fun decodeSyncPayload(bytes: ByteArray): ByteArray {
-        val raw = bytes.toString(Charsets.UTF_8)
-        if (!raw.startsWith("sync1|")) return bytes
-        val encoded = raw.removePrefix("sync1|").substringAfter('|', missingDelimiterValue = "")
-        return runCatching { android.util.Base64.decode(encoded, android.util.Base64.DEFAULT) }.getOrDefault(bytes)
-    }
-
     // --- Active Escalating Haptics for Panic Interventions ---
 
     private fun startEscalatingVibrator() {
-        if (vibratorJob != null) return // Already running
-
-        vibratorJob = activityScope.launch(Dispatchers.Default) {
+        alertLoop.start(WearHapticPattern.PANIC_PULSE) {
             var cycle = 1
             while (isActive) {
                 val duration = (70L * cycle).coerceAtMost(350L)
@@ -899,25 +884,19 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                 delay(450L)
             }
         }
-        Toast.makeText(this, "Escalating watch haptic loop started!", Toast.LENGTH_SHORT).show()
     }
 
     private fun startFrustrationVibrator() {
-        if (vibratorJob != null) return // Already running
-
-        vibratorJob = activityScope.launch(Dispatchers.Default) {
+        alertLoop.start(WearHapticPattern.FRUSTRATION) {
             while (isActive) {
                 wearHaptics.play(WearHapticPattern.FRUSTRATION, 140)
                 delay(3000L) // gap between double pulses
             }
         }
-        Toast.makeText(this, "Biometric frustration alert active! Take a 5 min break.", Toast.LENGTH_SHORT).show()
     }
 
     private fun stopVibrator() {
-        vibratorJob?.cancel()
-        vibratorJob = null
-        wearHaptics.cancel()
+        alertLoop.stop(force = true)
     }
 
     // --- SensorEventListener ---
@@ -1180,27 +1159,30 @@ internal fun WearQuickActions(
 
 @Composable
 private fun WatchHapticToggle(haptics: WearHaptics) {
-    var enabled by remember(haptics) { mutableStateOf(haptics.isEnabled) }
-    ToggleChip(checked = enabled, onCheckedChange = { enabled = it; haptics.setEnabled(it) },
+    val settings by haptics.settings.collectAsState()
+    ToggleChip(checked = settings.enabled, onCheckedChange = { haptics.setEnabled(it) },
         label = { Text("HAPTICS", fontFamily = DotMatrixFont, fontSize = 12.sp) },
-        toggleControl = { Switch(checked = enabled) }, modifier = Modifier.fillMaxWidth())
+        toggleControl = { Switch(checked = settings.enabled) }, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
 private fun WatchHapticIntensity(haptics: WearHaptics) {
-    var intensity by remember(haptics) { mutableIntStateOf(haptics.intensity) }
+    val settings by haptics.settings.collectAsState()
+    Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(intensity.toString(), Modifier.weight(1f), fontFamily = DotMatrixFont, fontSize = 13.sp)
-            WearBentoIconButton(onClick = { haptics.setIntensity(intensity - 32); intensity = haptics.intensity },
+            Text(settings.intensity.toString(), Modifier.weight(1f), fontFamily = DotMatrixFont, fontSize = 13.sp)
+            WearBentoIconButton(onClick = { haptics.setIntensity(haptics.intensity - 32) },
                 modifier = Modifier.size(40.dp), color = CardWhite.copy(alpha = 0.14f), contentColor = CardWhite) {
                 Icon(Icons.Default.Remove, contentDescription = "Lower haptic intensity", modifier = Modifier.size(18.dp))
             }
-            WearBentoIconButton(onClick = { haptics.setIntensity(intensity + 32); intensity = haptics.intensity },
+            WearBentoIconButton(onClick = { haptics.setIntensity(haptics.intensity + 32) },
                 modifier = Modifier.size(40.dp), color = CardWhite.copy(alpha = 0.14f), contentColor = CardWhite) {
                 Icon(Icons.Default.Add, contentDescription = "Raise haptic intensity", modifier = Modifier.size(18.dp))
             }
         }
+        settings.error?.let { Text(it, fontSize = 11.sp, color = PanicRed, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+    }
 }
 
 @Composable

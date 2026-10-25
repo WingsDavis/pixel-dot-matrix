@@ -134,16 +134,16 @@ class WearableSyncManager(
      * Standard path used for sync: /pomodoro/state
      */
     @Synchronized
-    fun pushStateToWearable(force: Boolean = false, commandId: String? = null) {
+    fun pushStateToWearable(force: Boolean = false, commandId: String? = null, newSession: Boolean = false) {
         val now = System.currentTimeMillis()
         val expectedSeconds = TimerSnapshotResolver.remainingAt(currentSnapshot, now)
         val hasMeaningfulChange = currentSnapshot.authority != TimerAuthority.PHONE ||
             currentSnapshot.state != engine.currentState.value ||
             currentSnapshot.isRunning != engine.isRunning.value ||
             kotlin.math.abs(expectedSeconds - engine.secondsRemaining.value) > 1
-        val advancesRevision = hasMeaningfulChange || force || commandId != null
+        val advancesRevision = hasMeaningfulChange || force || commandId != null || newSession
         if (hasPublishedInProcess && !advancesRevision) return
-        if (advancesRevision && lastPublishedState != engine.currentState.value) {
+        if (newSession || advancesRevision && lastPublishedState != engine.currentState.value) {
             timerSessionId = UUID.randomUUID().toString()
         }
         val snapshot = if (advancesRevision) createTimerSnapshot(timerRevision.get() + 1) else currentSnapshot
