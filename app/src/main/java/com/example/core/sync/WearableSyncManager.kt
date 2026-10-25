@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,8 +37,6 @@ data class WatchFaceSyncStatus(
     val appliedAt: Long? = null
 )
 
-private data class WatchFaceDraft(val version: Long, val config: WatchFaceConfig)
-
 class WearableSyncManager(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -61,13 +60,19 @@ class WearableSyncManager(
             messageClient
         )
     }
-    private val _watchFaceSyncStatus = MutableStateFlow(WatchFaceSyncStatus())
-    val watchFaceSyncStatus: StateFlow<WatchFaceSyncStatus> = _watchFaceSyncStatus.asStateFlow()
+    private val watchFaceTransactions = WatchFaceConfigTransactions(
+        scope = scope,
+        currentConfig = { watchFaceConfigStore.config.value },
+        saveConfig = watchFaceConfigStore::save,
+        markApplied = watchFaceConfigStore::markApplied,
+        publish = ::publishWatchFaceConfig,
+        onFailure = { Log.e(TAG, "Failed to save or sync watch face config", it) }
+    )
+    val watchFaceEditorConfig: StateFlow<WatchFaceConfig> = watchFaceTransactions.editorConfig
+    val watchFaceSyncStatus: StateFlow<WatchFaceSyncStatus> = watchFaceTransactions.status
     private val _connectedNodeCount = MutableStateFlow(0)
     val connectedNodeCount: StateFlow<Int> = _connectedNodeCount.asStateFlow()
 
-    @Volatile
-    private var pendingWatchFaceRevision: String? = null
     private val restoredTimerSnapshot = timerSnapshotStore.load()
     private val timerRevision = AtomicLong(restoredTimerSnapshot?.revision ?: System.currentTimeMillis())
     private var timerSessionId = restoredTimerSnapshot?.sessionId ?: UUID.randomUUID().toString()
@@ -75,9 +80,6 @@ class WearableSyncManager(
     private var localNodeId = SOURCE_PHONE
     private var lastPublishedState = engine.currentState.value
     private var currentSnapshot = restoredTimerSnapshot ?: createTimerSnapshot(timerRevision.get())
-    private val watchFaceDraftVersion = AtomicLong(0L)
-    private val lastSyncedDraftVersion = AtomicLong(0L)
-    private val watchFaceDrafts = Channel<WatchFaceDraft>(Channel.CONFLATED)
     private val dailyFocusGoals = Channel<DailyFocusProgress>(Channel.CONFLATED)
     @Volatile
     private var hasPublishedInProcess = false
@@ -107,19 +109,7 @@ class WearableSyncManager(
                     .onFailure { Log.e(TAG, "Failed to publish daily focus target", it) }
             }
         }
-        scope.launch(Dispatchers.IO) {
-            for (draft in watchFaceDrafts) {
-                if (draft.version <= lastSyncedDraftVersion.get()) continue
-                val current = watchFaceConfigStore.config.value
-                watchFaceConfigStore.save(
-                    draft.config.copy(
-                        localRevision = "draft-${UUID.randomUUID()}",
-                        appliedRevision = current.appliedRevision
-                    )
-                )
-            }
-        }
-        scope.launch(Dispatchers.IO) { replayStoredWatchFaceConfig() }
+        replayStoredWatchFaceConfig()
         scope.launch(Dispatchers.IO) {
             while (isActive) {
                 _connectedNodeCount.value = runCatching { nodeClient.connectedNodes.await().size }.getOrDefault(0)
@@ -273,19 +263,9 @@ class WearableSyncManager(
     /**
      * Pushes custom text to be displayed on the watch face complication.
      */
-    fun pushCustomText(text: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                syncOutbox.enqueue(
-                    PATH_CUSTOM_TEXT,
-                    text.toByteArray(),
-                    coalesceKey = "watchface-custom-text"
-                )
-                Log.d(TAG, "Queued custom text for Wear delivery: $text")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to push custom text", e)
-            }
-        }
+    fun pushCustomText(text: String): Job {
+        val config = watchFaceEditorConfig.value.copy(customText = text)
+        return watchFaceTransactions.apply(previewConfig = config) { config }
     }
 
     /**
@@ -301,61 +281,39 @@ class WearableSyncManager(
         showPanicLogo: Boolean,
         ambientStyle: String,
         themePreset: String
-    ) {
-        lastSyncedDraftVersion.set(watchFaceDraftVersion.get())
-        val revision = UUID.randomUUID().toString()
-        watchFaceConfigStore.save(
-            WatchFaceConfig(
-                hourColor = timerColor,
-                minuteColor = idleTimeColor,
-                secondColor = secondsColor,
-                customText = customText,
-                showLogo = showPanicLogo,
-                preset = themePreset,
-                leftSlotMode = leftSlotMode,
-                bottomRightSlotMode = bottomRightSlotMode,
-                ambientStyle = ambientStyle,
-                localRevision = revision,
-                appliedRevision = watchFaceConfigStore.config.value.appliedRevision
-            )
+    ): Job {
+        val config = WatchFaceConfig(
+            hourColor = timerColor,
+            minuteColor = idleTimeColor,
+            secondColor = secondsColor,
+            customText = customText,
+            showLogo = showPanicLogo,
+            preset = themePreset,
+            leftSlotMode = leftSlotMode,
+            bottomRightSlotMode = bottomRightSlotMode,
+            ambientStyle = ambientStyle
         )
-        pendingWatchFaceRevision = revision
-        _watchFaceSyncStatus.value = WatchFaceSyncStatus(
-            phase = WatchFaceSyncPhase.SYNCING,
-            revision = revision,
-            message = "Waiting for watch acknowledgement"
-        )
+        return watchFaceTransactions.apply(previewConfig = config) { config }
+    }
 
-        scope.launch(Dispatchers.IO) {
-            try {
-                val request = PutDataMapRequest.create(PATH_WATCHFACE_CONFIG_V2).apply {
-                    dataMap.putInt(KEY_SCHEMA_VERSION, WATCHFACE_CONFIG_SCHEMA_VERSION)
-                    dataMap.putString(KEY_REVISION, revision)
-                    dataMap.putString(KEY_SOURCE_DEVICE, "phone")
-                    dataMap.putString(KEY_TIMER_COLOR, timerColor)
-                    dataMap.putString(KEY_SECONDS_COLOR, secondsColor)
-                    dataMap.putString(KEY_IDLE_TIME_COLOR, idleTimeColor)
-                    dataMap.putString(KEY_CUSTOM_TEXT, customText)
-                    dataMap.putString(KEY_LEFT_SLOT_MODE, leftSlotMode)
-                    dataMap.putString(KEY_BOTTOM_RIGHT_SLOT_MODE, bottomRightSlotMode)
-                    dataMap.putBoolean(KEY_SHOW_PANIC_LOGO, showPanicLogo)
-                    dataMap.putString(KEY_AMBIENT_STYLE, ambientStyle)
-                    dataMap.putString(KEY_THEME_PRESET, themePreset)
-                    dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
-                }.asPutDataRequest()
-
-                request.setUrgent()
-                dataClient.putDataItem(request).await()
-                Log.d(TAG, "Pushed watch face config revision=$revision; awaiting Wear acknowledgement.")
-            } catch (e: Exception) {
-                _watchFaceSyncStatus.value = WatchFaceSyncStatus(
-                    phase = WatchFaceSyncPhase.FAILED,
-                    revision = revision,
-                    message = e.message ?: "Unable to send configuration"
-                )
-                Log.e(TAG, "Failed to push watch face config", e)
-            }
-        }
+    private suspend fun publishWatchFaceConfig(config: WatchFaceConfig) {
+        val request = PutDataMapRequest.create(PATH_WATCHFACE_CONFIG_V2).apply {
+            dataMap.putInt(KEY_SCHEMA_VERSION, WATCHFACE_CONFIG_SCHEMA_VERSION)
+            dataMap.putString(KEY_REVISION, requireNotNull(config.localRevision))
+            dataMap.putString(KEY_SOURCE_DEVICE, SOURCE_PHONE)
+            dataMap.putString(KEY_TIMER_COLOR, config.hourColor)
+            dataMap.putString(KEY_SECONDS_COLOR, config.secondColor)
+            dataMap.putString(KEY_IDLE_TIME_COLOR, config.minuteColor)
+            dataMap.putString(KEY_CUSTOM_TEXT, config.customText)
+            dataMap.putString(KEY_LEFT_SLOT_MODE, config.leftSlotMode)
+            dataMap.putString(KEY_BOTTOM_RIGHT_SLOT_MODE, config.bottomRightSlotMode)
+            dataMap.putBoolean(KEY_SHOW_PANIC_LOGO, config.showLogo)
+            dataMap.putString(KEY_AMBIENT_STYLE, config.ambientStyle)
+            dataMap.putString(KEY_THEME_PRESET, config.preset)
+            dataMap.putLong(KEY_TIMESTAMP, config.updatedAtEpochMs)
+        }.asPutDataRequest().setUrgent()
+        dataClient.putDataItem(request).await()
+        Log.d(TAG, "Pushed watch face config revision=${config.localRevision}; awaiting Wear acknowledgement.")
     }
 
     fun pushWatchFaceLogo(pngBytes: ByteArray) {
@@ -411,18 +369,12 @@ class WearableSyncManager(
             Log.d(TAG, "Rejected Wear snapshot revision=${incoming.revision}: ${(resolution as SnapshotResolution.Reject).reason}")
         } else if (path == PATH_WATCHFACE_STATUS_V2) {
             val revision = dataMap.getString(KEY_REVISION) ?: return false
-            if (pendingWatchFaceRevision != null && pendingWatchFaceRevision != revision) return false
-            val success = dataMap.getBoolean(KEY_SUCCESS, false)
-            _watchFaceSyncStatus.value = WatchFaceSyncStatus(
-                phase = if (success) WatchFaceSyncPhase.APPLIED else WatchFaceSyncPhase.FAILED,
+            watchFaceTransactions.acknowledge(
                 revision = revision,
-                message = dataMap.getString(KEY_STATUS_MESSAGE) ?: if (success) "Complications synced" else "Watch rejected configuration",
+                success = dataMap.getBoolean(KEY_SUCCESS, false),
+                message = dataMap.getString(KEY_STATUS_MESSAGE),
                 appliedAt = dataMap.getLong(KEY_APPLIED_AT, 0L).takeIf { it > 0L }
             )
-            if (success) {
-                pendingWatchFaceRevision = null
-                watchFaceConfigStore.markApplied(revision)
-            }
         }
         return false
     }
@@ -506,17 +458,24 @@ class WearableSyncManager(
         dataClient.putDataItem(request).await()
     }
 
-    fun clearWatchFacePreferences() {
-        watchFaceConfigStore.restore(WatchFaceConfig(), emptyList(), emptyList())
-        refreshRestoredWatchFaceSettings()
+    fun clearWatchFacePreferences(): Job {
+        val defaults = WatchFaceConfig()
+        return watchFaceTransactions.apply(previewConfig = defaults) {
+            watchFaceConfigStore.restore(defaults, emptyList(), emptyList())
+            watchFaceConfigStore.config.value
+        }
     }
 
-    fun applyWatchFacePreset(id: String) {
-        watchFaceConfigStore.preset(id)?.config?.let(watchFaceConfigStore::save)
-    }
+    fun applyWatchFacePreset(id: String) = watchFaceTransactions.applyPreset(id, watchFaceConfigStore::preset)
 
-    fun saveWatchFaceDraft(config: WatchFaceConfig) {
-        watchFaceDrafts.trySend(WatchFaceDraft(watchFaceDraftVersion.incrementAndGet(), config))
+    fun saveWatchFaceDraft(config: WatchFaceConfig) = watchFaceTransactions.saveDraft(config)
+
+    fun editWatchFaceDraft(update: (WatchFaceConfig) -> WatchFaceConfig) = watchFaceTransactions.editDraft(update)
+
+    suspend fun restoreWatchFacePreferences(settings: WatchFacePreferences) {
+        watchFaceTransactions.restoreLocal {
+            watchFaceConfigStore.restore(settings.config, settings.presets, settings.recentColors)
+        }.await()
     }
 
     fun saveWatchFacePreset(name: String, config: WatchFaceConfig) = watchFaceConfigStore.savePreset(name, config)
@@ -525,43 +484,22 @@ class WearableSyncManager(
     fun deleteWatchFacePreset(id: String) = watchFaceConfigStore.deletePreset(id)
     fun rememberWatchFaceColor(hex: String) = watchFaceConfigStore.rememberColor(hex)
 
-    fun refreshRestoredWatchFaceSettings() {
-        watchFaceConfigStore.refresh()
-        val config = watchFaceConfigStore.config.value
-        pushWatchFaceConfig(config.hourColor, config.secondColor, config.minuteColor, config.customText,
-            config.leftSlotMode, config.bottomRightSlotMode, config.showLogo, config.ambientStyle, config.preset)
+    fun refreshRestoredWatchFaceSettings(): Job {
+        val config = watchFaceEditorConfig.value
+        return watchFaceTransactions.apply(previewConfig = config) {
+            watchFaceConfigStore.refresh()
+            config
+        }
     }
 
-    fun resetWatchFaceConfig() {
-        val defaults = watchFaceConfigStore.reset()
-        resetWatchFaceLogo()
-        pushWatchFaceConfig(
-            timerColor = defaults.hourColor,
-            secondsColor = defaults.secondColor,
-            idleTimeColor = defaults.minuteColor,
-            customText = defaults.customText,
-            leftSlotMode = defaults.leftSlotMode,
-            bottomRightSlotMode = defaults.bottomRightSlotMode,
-            showPanicLogo = defaults.showLogo,
-            ambientStyle = defaults.ambientStyle,
-            themePreset = defaults.preset
-        )
+    fun resetWatchFaceConfig(): Job {
+        val defaults = WatchFaceConfig()
+        return watchFaceTransactions.apply(previewConfig = defaults, beforePublish = ::resetWatchFaceLogoAndAwait) { defaults }
     }
 
     private fun replayStoredWatchFaceConfig() {
-        val config = watchFaceConfigStore.config.value
-        if (config.localRevision == null) return
-        pushWatchFaceConfig(
-            timerColor = config.hourColor,
-            secondsColor = config.secondColor,
-            idleTimeColor = config.minuteColor,
-            customText = config.customText,
-            leftSlotMode = config.leftSlotMode,
-            bottomRightSlotMode = config.bottomRightSlotMode,
-            showPanicLogo = config.showLogo,
-            ambientStyle = config.ambientStyle,
-            themePreset = config.preset
-        )
+        if (watchFaceConfigStore.config.value.localRevision == null) return
+        watchFaceTransactions.apply { watchFaceConfigStore.config.value }
     }
 
     private fun createTimerSnapshot(revision: Long) = TimerSnapshot(

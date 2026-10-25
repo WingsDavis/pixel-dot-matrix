@@ -424,10 +424,28 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Support duplicate, rename, apply, and delete for user presets.
 
 **Acceptance criteria**
-- [ ] Built-in presets cannot be accidentally deleted.
-- [ ] Applying a preset produces one versioned configuration transaction.
-- [ ] Editor preview exactly reflects the stored preset fields.
-- [ ] WFF-owned and app-owned settings are clearly distinguished.
+- [x] Built-in presets cannot be accidentally deleted.
+- [x] Applying a preset produces one versioned configuration transaction.
+- [x] Editor preview exactly reflects the stored preset fields.
+- [x] WFF-owned and app-owned settings are clearly distinguished.
+
+**Implementation and verification**
+- User presets support save, duplicate, rename, delete, and recreation; built-ins
+  are protected. Presets store the palette, text, logo visibility, and owned
+  content modes, not provider bindings or a separate logo image.
+- One writer orders preset apply, drafts, replay, reset, and live backup restore.
+  Optimistic editor state cannot be overwritten by an older draft/store echo;
+  stale acknowledgements cannot mark new edits applied. Sends have a deadline.
+- Twenty-four transaction regressions cover ordering, clock rollback, failures,
+  timeouts, cancellation, and restore. Native phone-preview checks cover colors,
+  phases, owned slots, targets, logos, and ambient pixel invariance.
+- The Wear receiver validates schema/order/input and rolls back failed writes.
+  The WFF defaults new bottom slots to the owned status provider with day/date
+  fallback; existing provider choices are not replaced.
+- All code acceptance checks are covered; actual editor/provider binding and
+  watch output remain pending. See [Presets](docs/PRESETS.md).
+- Final gate: 172 phone and 131 Wear tests passed; all APKs, phone
+  instrumentation compilation, and official WFF schema/memory validation pass.
 
 ### 16. Logo Controls `[~]`
 

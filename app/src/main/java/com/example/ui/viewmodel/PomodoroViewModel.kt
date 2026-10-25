@@ -58,7 +58,8 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
     private val runtime = TimerRuntime.get(application).also { runBlocking(Dispatchers.IO) { it.awaitReady() } }
     private val database = AppDatabase.getDatabase(application)
-    private val backupRepository = BackupRepository(application, database)
+    private val backupRepository = BackupRepository(application, database,
+        restoreFace = { runtime.syncManager.restoreWatchFacePreferences(it) })
     private val repository = PomodoroRepository(database.sessionDao(), database.panicDao())
     private val domainProfiles = DomainProfileStore(application)
     private val timerSettingsStore = TimerSettingsStore(application)
@@ -109,6 +110,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     private val wearableSyncManager = runtime.syncManager
     val watchFaceSyncStatus = wearableSyncManager.watchFaceSyncStatus
     val watchFaceConfig = wearableSyncManager.watchFaceConfig
+    val watchFaceEditorConfig = wearableSyncManager.watchFaceEditorConfig
     val watchFacePresets = wearableSyncManager.watchFacePresets
     val watchFaceRecentColors = wearableSyncManager.watchFaceRecentColors
     val syncOutboxItems = wearableSyncManager.syncOutboxItems
@@ -439,6 +441,9 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         wearableSyncManager.saveWatchFaceDraft(config)
     }
 
+    fun editWatchFaceDraft(update: (com.example.core.sync.WatchFaceConfig) -> com.example.core.sync.WatchFaceConfig) =
+        wearableSyncManager.editWatchFaceDraft(update)
+
     fun saveWatchFacePreset(name: String, config: com.example.core.sync.WatchFaceConfig) = wearableSyncManager.saveWatchFacePreset(name, config)
     fun duplicateWatchFacePreset(id: String, name: String) = wearableSyncManager.duplicateWatchFacePreset(id, name)
     fun renameWatchFacePreset(id: String, name: String) = wearableSyncManager.renameWatchFacePreset(id, name)
@@ -547,10 +552,10 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
                     focusGoalStore.save(DailyFocusGoalSettings())
                 }
             }
-            "watch face preferences" -> wearableSyncManager.clearWatchFacePreferences()
+            "watch face preferences" -> deleteFacePreferences()
             "custom logo media" -> { wearableSyncManager.resetWatchFaceLogoAndAwait(); return@withContext "Logo reset queued for the watch" }
             "watch artwork and face settings" -> {
-                wearableSyncManager.clearWatchFacePreferences()
+                deleteFacePreferences()
                 wearableSyncManager.resetWatchFaceLogoAndAwait()
                 return@withContext "Face preferences deleted; logo reset queued for the watch"
             }
@@ -558,6 +563,15 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             else -> error("Unknown data category")
         }
         "Deleted $target"
+    }
+
+    private suspend fun deleteFacePreferences() {
+        wearableSyncManager.clearWatchFacePreferences().join()
+        val saved = wearableSyncManager.watchFaceConfig.value
+        check(saved.copy(localRevision = null, appliedRevision = null, updatedAtEpochMs = 0L) == com.example.core.sync.WatchFaceConfig() &&
+            wearableSyncManager.watchFacePresets.value.isEmpty() && wearableSyncManager.watchFaceRecentColors.value.isEmpty()) {
+            "Could not confirm deletion of watch-face preferences"
+        }
     }
 
     fun syncWatchFaceLogo(uri: Uri) {

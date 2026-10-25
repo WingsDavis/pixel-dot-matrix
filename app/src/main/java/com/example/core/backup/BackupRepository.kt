@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import com.example.core.goal.DailyFocusGoalStore
 import com.example.core.protection.DomainProfileStore
 import com.example.core.sync.WatchFaceConfigStore
+import com.example.core.sync.WatchFacePreferences
 import com.example.core.timer.TimerSettingsStore
 import com.example.data.database.AppDatabase
 import com.example.data.database.RestoreSettingsEntity
@@ -16,7 +17,11 @@ import kotlinx.coroutines.sync.withLock
 
 data class BackupRestoreResult(val sessionsAdded: Int, val incidentsAdded: Int, val tasksAdded: Int, val settingsPending: Boolean)
 
-class BackupRepository(private val context: Context, private val database: AppDatabase) {
+class BackupRepository(
+    private val context: Context,
+    private val database: AppDatabase,
+    private val restoreFace: (suspend (WatchFacePreferences) -> Unit)? = null
+) {
     suspend fun snapshot(): BackupDocument = withContext(Dispatchers.IO) { restoreMutex.withLock {
         check(database.restoreSettingsDao().pending() == null) { "Finish the pending settings restore before exporting" }
         val faceStore = WatchFaceConfigStore(context)
@@ -25,8 +30,8 @@ class BackupRepository(private val context: Context, private val database: AppDa
         val settings = BackupSettings(
             timer = TimerSettingsStore(context).loadAndMigrate(),
             dailyGoal = DailyFocusGoalStore(context).loadForBackup(),
-            watchFace = face.config.copy(localRevision = null, appliedRevision = null),
-            presets = face.presets.map { it.copy(config = it.config.copy(localRevision = null, appliedRevision = null)) },
+            watchFace = face.config.copy(localRevision = null, appliedRevision = null, updatedAtEpochMs = 0L),
+            presets = face.presets.map { it.copy(config = it.config.copy(localRevision = null, appliedRevision = null, updatedAtEpochMs = 0L)) },
             recentColors = face.recentColors,
             domainProfiles = domains.profiles(),
             activeProfileId = domains.activeProfileId(),
@@ -75,7 +80,9 @@ class BackupRepository(private val context: Context, private val database: AppDa
         val settings = BackupCodec.decode(pending.payload).settings
         TimerSettingsStore(context).write(settings.timer)
         DailyFocusGoalStore(context).save(settings.dailyGoal)
-        WatchFaceConfigStore(context).restore(settings.watchFace, settings.presets, settings.recentColors)
+        val face = WatchFacePreferences(settings.watchFace, settings.presets, settings.recentColors)
+        if (restoreFace != null) restoreFace.invoke(face)
+        else WatchFaceConfigStore(context).restore(face.config, face.presets, face.recentColors)
         DomainProfileStore(context).restore(settings.domainProfiles, settings.activeProfileId, settings.autoFocusProtection)
         database.restoreSettingsDao().clear()
         return true

@@ -81,6 +81,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
@@ -121,6 +122,11 @@ private val studioColors = listOf(
     StudioColor("ice", "Ice", "#ff80deea", Color(0xFF80DEEA))
 )
 
+private fun studioColorFor(raw: String, fallback: String): StudioColor =
+    studioColors.firstOrNull { it.hex.equals(raw, true) } ?: normalizeHexColor(raw)?.let {
+        StudioColor("custom", "Custom", it, Color(it.toColorInt()))
+    } ?: studioColors.first { it.id == fallback }
+
 @Composable
 fun WearScreen(
     viewModel: PomodoroViewModel,
@@ -130,24 +136,20 @@ fun WearScreen(
     val syncStatus by viewModel.watchFaceSyncStatus.collectAsState()
     val outboxItems by viewModel.syncOutboxItems.collectAsState(initial = emptyList())
     val savedConfig by viewModel.watchFaceConfig.collectAsState()
+    val editorConfig by viewModel.watchFaceEditorConfig.collectAsState()
     val userPresets by viewModel.watchFacePresets.collectAsState()
     val recentColors by viewModel.watchFaceRecentColors.collectAsState()
+    val dailyProgress by viewModel.dailyFocusProgress.collectAsState()
     var previewState by remember { mutableStateOf("Idle") }
-    var hourColor by remember(savedConfig.hourColor) {
-        mutableStateOf(studioColors.find { it.hex.equals(savedConfig.hourColor, true) } ?: studioColors.first { it.id == "orange" })
-    }
-    var minuteColor by remember(savedConfig.minuteColor) {
-        mutableStateOf(studioColors.find { it.hex.equals(savedConfig.minuteColor, true) } ?: studioColors.first { it.id == "white" })
-    }
-    var secondColor by remember(savedConfig.secondColor) {
-        mutableStateOf(studioColors.find { it.hex.equals(savedConfig.secondColor, true) } ?: studioColors.first { it.id == "orange" })
-    }
-    var themePreset by remember(savedConfig.preset) { mutableStateOf(savedConfig.preset) }
-    var customText by remember(savedConfig.customText) { mutableStateOf(savedConfig.customText) }
-    var showPanicLogo by remember(savedConfig.showLogo) { mutableStateOf(savedConfig.showLogo) }
-    var leftSlotMode by remember(savedConfig.leftSlotMode) { mutableStateOf(savedConfig.leftSlotMode) }
-    var bottomRightSlotMode by remember(savedConfig.bottomRightSlotMode) { mutableStateOf(savedConfig.bottomRightSlotMode) }
-    var ambientStyle by remember(savedConfig.ambientStyle) { mutableStateOf(savedConfig.ambientStyle) }
+    val hourColor = studioColorFor(editorConfig.hourColor, "orange")
+    val minuteColor = studioColorFor(editorConfig.minuteColor, "white")
+    val secondColor = studioColorFor(editorConfig.secondColor, "orange")
+    val themePreset = editorConfig.preset
+    val customText = editorConfig.customText
+    val showPanicLogo = editorConfig.showLogo
+    val leftSlotMode = editorConfig.leftSlotMode
+    val bottomRightSlotMode = editorConfig.bottomRightSlotMode
+    val ambientStyle = editorConfig.ambientStyle
     var customLogo by remember { mutableStateOf<Bitmap?>(null) }
     var logoZoom by remember { mutableStateOf(1f) }
     var logoOffsetX by remember { mutableStateOf(0f) }
@@ -156,8 +158,13 @@ fun WearScreen(
     var customPreviewColor by remember { mutableStateOf<Color?>(null) }
     var presetDialog by remember { mutableStateOf<String?>(null) }
     var presetName by remember { mutableStateOf("") }
-    var selectedUserPreset by remember { mutableStateOf<String?>(null) }
-    var editorHydrated by remember { mutableStateOf(false) }
+    val selectedUserPreset = userPresets.firstOrNull { it.id == themePreset }?.id
+    var presetError by remember { mutableStateOf<String?>(null) }
+    fun applyPreset(id: String) {
+        customPreviewColor = null
+        customHex = ""
+        viewModel.applyWatchFacePreset(id)
+    }
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             customLogo = decodeLogoPreview(context, uri)
@@ -172,36 +179,7 @@ fun WearScreen(
         }
     }
 
-    LaunchedEffect(
-        hourColor.hex,
-        minuteColor.hex,
-        secondColor.hex,
-        customText,
-        showPanicLogo,
-        themePreset,
-        leftSlotMode,
-        bottomRightSlotMode,
-        ambientStyle
-    ) {
-        if (!editorHydrated) {
-            editorHydrated = true
-        } else {
-            viewModel.saveWatchFaceDraft(
-                WatchFaceConfig(
-                    hourColor = hourColor.hex,
-                    minuteColor = minuteColor.hex,
-                    secondColor = secondColor.hex,
-                    customText = customText,
-                    showLogo = showPanicLogo,
-                    preset = themePreset,
-                    leftSlotMode = leftSlotMode,
-                    bottomRightSlotMode = bottomRightSlotMode,
-                    ambientStyle = ambientStyle,
-                    appliedRevision = savedConfig.appliedRevision
-                )
-            )
-        }
-    }
+    LaunchedEffect(presetDialog) { presetError = null }
 
     if (presetDialog != null) {
         AlertDialog(
@@ -210,15 +188,17 @@ fun WearScreen(
             text = {
                 OutlinedTextField(
                     value = presetName,
-                    onValueChange = { presetName = it },
+                    onValueChange = { presetName = it; presetError = null },
                     label = { Text("Preset name") },
+                    isError = presetError != null,
+                    supportingText = { presetError?.let { Text(it) } },
                     singleLine = true
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     val name = presetName.trim()
-                    if (name.isNotEmpty()) {
+                    try {
                         when (presetDialog) {
                             "save" -> viewModel.saveWatchFacePreset(
                                 name,
@@ -239,8 +219,8 @@ fun WearScreen(
                         }
                         presetDialog = null
                         presetName = ""
-                    }
-                }) { Text("Save") }
+                    } catch (error: Exception) { presetError = error.message ?: "Could not save preset" }
+                }, enabled = presetName.trim().isNotEmpty() && presetName.trim().length <= 64) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { presetDialog = null }) { Text("Cancel") } }
         )
@@ -272,6 +252,7 @@ fun WearScreen(
             logoOffsetX = logoOffsetX,
             logoOffsetY = logoOffsetY,
             ambient = previewState == "Ambient",
+            dailyTargetText = dailyProgress.takeIf { it.settings.enabled }?.shortText.orEmpty(),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(310.dp)
@@ -289,8 +270,7 @@ fun WearScreen(
                     values = userPresets.map { it.id },
                     selectedValue = selectedUserPreset ?: "",
                     onSelected = {
-                        selectedUserPreset = it
-                        viewModel.applyWatchFacePreset(it)
+                        applyPreset(it)
                     },
                     labels = userPresets.associate { it.id to it.name }
                 )
@@ -304,25 +284,27 @@ fun WearScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedButton(onClick = { presetName = userPresets.firstOrNull { it.id == selectedUserPreset }?.name.orEmpty(); presetDialog = "rename" }, modifier = Modifier.weight(1f)) { Text("Rename") }
                     OutlinedButton(onClick = { presetName = "Copy"; presetDialog = "duplicate" }, modifier = Modifier.weight(1f)) { Text("Duplicate") }
-                    OutlinedButton(onClick = { viewModel.deleteWatchFacePreset(selectedUserPreset!!); selectedUserPreset = null }, modifier = Modifier.weight(1f)) { Text("Delete") }
+                    OutlinedButton(onClick = {
+                        runCatching { viewModel.deleteWatchFacePreset(selectedUserPreset) }
+                            .onFailure { Toast.makeText(context, it.message ?: "Could not delete preset", Toast.LENGTH_LONG).show() }
+                    }, modifier = Modifier.weight(1f)) { Text("Delete") }
                 }
             }
         }
 
         StudioSection(title = "Watch Face Editor", icon = Icons.Default.Settings) {
-            Text("Preset", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("Preview preset", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             StudioChipRow(
                 values = listOf("original", "terminal", "high_contrast", "focus"),
                 selectedValue = themePreset,
                 onSelected = {
-                    themePreset = it
-                    viewModel.applyWatchFacePreset(it)
+                    applyPreset(it)
                 }
             )
             ToggleRow(
                 label = "Panic logo",
                 checked = showPanicLogo,
-                onCheckedChange = { showPanicLogo = it }
+                onCheckedChange = { value -> viewModel.editWatchFaceDraft { it.copy(showLogo = value) } }
             )
             OutlinedButton(
                 onClick = { logoPicker.launch("image/*") },
@@ -358,16 +340,15 @@ fun WearScreen(
 
         StudioSection(title = "Watch Face Preview Colors", icon = Icons.Default.Palette) {
             Text("Hour", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            ColorSwatches(studioColors, hourColor) {
-                hourColor = it
-                themePreset = it.id
+            ColorSwatches(studioColors, hourColor) { option ->
+                viewModel.editWatchFaceDraft { it.copy(hourColor = option.hex, preset = option.id) }
             }
             Spacer(modifier = Modifier.height(10.dp))
             Text("Minute", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            ColorSwatches(studioColors, minuteColor) { minuteColor = it }
+            ColorSwatches(studioColors, minuteColor) { option -> viewModel.editWatchFaceDraft { it.copy(minuteColor = option.hex) } }
             Spacer(modifier = Modifier.height(10.dp))
             Text("Second", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            ColorSwatches(studioColors, secondColor) { secondColor = it }
+            ColorSwatches(studioColors, secondColor) { option -> viewModel.editWatchFaceDraft { it.copy(secondColor = option.hex) } }
             Text("Custom preview color", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(
                 value = customHex,
@@ -409,7 +390,7 @@ fun WearScreen(
         StudioSection(title = "Live Sync Complications", icon = Icons.Default.Watch) {
             OutlinedTextField(
                 value = customText,
-                onValueChange = { customText = it },
+                onValueChange = { value -> viewModel.editWatchFaceDraft { it.copy(customText = value) } },
                 label = { Text("Custom left text") },
                 minLines = 3,
                 maxLines = 6,
@@ -417,9 +398,9 @@ fun WearScreen(
             )
             Text("Left slot", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             StudioChipRow(
-                values = listOf("custom_text", "phase", "heart_rate", "next_break", "streak", "daily_target", "hidden"),
+                values = listOf("custom_text", "phase", "heart_rate", "next_break", "daily_target", "hidden"),
                 selectedValue = leftSlotMode,
-                onSelected = { leftSlotMode = it },
+                onSelected = { value -> viewModel.editWatchFaceDraft { it.copy(leftSlotMode = value) } },
                 labels = mapOf(
                     "custom_text" to "Text",
                     "phase" to "Phase",
@@ -434,7 +415,7 @@ fun WearScreen(
             StudioChipRow(
                 values = listOf("date", "phase", "timer", "battery", "daily_target", "hidden"),
                 selectedValue = bottomRightSlotMode,
-                onSelected = { bottomRightSlotMode = it },
+                onSelected = { value -> viewModel.editWatchFaceDraft { it.copy(bottomRightSlotMode = value) } },
                 labels = mapOf(
                     "date" to "Date",
                     "phase" to "Phase",
@@ -444,27 +425,21 @@ fun WearScreen(
                     "hidden" to "Hidden"
                 )
             )
-            Text("Ambient", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            StudioChipRow(
-                values = listOf("dim", "minimal"),
-                selectedValue = ambientStyle,
-                onSelected = { ambientStyle = it },
-                labels = mapOf("dim" to "Dim", "minimal" to "Minimal")
-            )
         }
 
         Button(
             onClick = {
+                val current = viewModel.watchFaceEditorConfig.value
                 viewModel.syncWatchFaceConfig(
-                    timerColor = hourColor.hex,
-                    secondsColor = secondColor.hex,
-                    idleTimeColor = minuteColor.hex,
-                    customText = customText,
-                    leftSlotMode = leftSlotMode,
-                    bottomRightSlotMode = bottomRightSlotMode,
-                    showPanicLogo = showPanicLogo,
-                    ambientStyle = ambientStyle,
-                    themePreset = themePreset
+                    timerColor = current.hourColor,
+                    secondsColor = current.secondColor,
+                    idleTimeColor = current.minuteColor,
+                    customText = current.customText,
+                    leftSlotMode = current.leftSlotMode,
+                    bottomRightSlotMode = current.bottomRightSlotMode,
+                    showPanicLogo = current.showLogo,
+                    ambientStyle = current.ambientStyle,
+                    themePreset = current.preset
                 )
             },
             colors = ButtonDefaults.buttonColors(
@@ -605,7 +580,7 @@ private fun StudioChipRow(
             FilterChip(
                 selected = value == selectedValue,
                 onClick = { onSelected(value) },
-                label = { Text(labels[value] ?: value.toStudioLabel()) },
+                label = { Text(labels[value] ?: value.toStudioLabel(), maxLines = 2, overflow = TextOverflow.Ellipsis) },
                 colors = FilterChipDefaults.filterChipColors(
                     containerColor = Color.White.copy(alpha = 0.08f),
                     labelColor = Color.White,
@@ -664,7 +639,7 @@ private fun ToggleRow(
 }
 
 @Composable
-private fun WatchFacePreview(
+internal fun WatchFacePreview(
     previewState: String,
     hourColor: Color,
     minuteColor: Color,
@@ -678,6 +653,7 @@ private fun WatchFacePreview(
     logoOffsetX: Float = 0f,
     logoOffsetY: Float = 0f,
     ambient: Boolean,
+    dailyTargetText: String = "",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -685,12 +661,31 @@ private fun WatchFacePreview(
         runCatching { Typeface.createFromAsset(context.assets, "twinkle_star.ttf") }
             .getOrDefault(Typeface.create("cursive", Typeface.NORMAL))
     }
+    val dotTypeface = remember(context) { Typeface.createFromAsset(context.assets, "ndot.ttf") }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(286.dp)) {
             val diameter = size.minDimension
             val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
-            drawCircle(color = Color(0xFF050505), radius = diameter / 2f)
+            drawCircle(color = if (ambient) Color.Black else Color(0xFF050505), radius = diameter / 2f)
+            if (ambient) {
+                val scale = diameter / 450f
+                val digits = previewDigits("Idle")
+                val time = "${digits.first}:${digits.second}"
+                val paint = TextPaint().apply {
+                    isAntiAlias = true
+                    color = android.graphics.Color.rgb(119, 119, 119)
+                    textSize = 78f * scale
+                    typeface = dotTypeface
+                }
+                val layout = StaticLayout.Builder.obtain(time, 0, time.length, paint, (250f * scale).toInt())
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER).setIncludePad(false).setMaxLines(1).build()
+                drawContext.canvas.nativeCanvas.save()
+                drawContext.canvas.nativeCanvas.translate(topLeft.x + 100f * scale, topLeft.y + 180f * scale)
+                layout.draw(drawContext.canvas.nativeCanvas)
+                drawContext.canvas.nativeCanvas.restore()
+                return@Canvas
+            }
             drawCircle(
                 color = Color.White.copy(alpha = 0.08f),
                 radius = diameter / 2f - 2.dp.toPx(),
@@ -740,12 +735,12 @@ private fun WatchFacePreview(
             drawPreviewDigit(bottomDigits[0], digitX, bottomDigitY, digitSpacing, dotRadius, bottomDigitColor)
             drawPreviewDigit(bottomDigits[1], digitX + digitGap, bottomDigitY, digitSpacing, dotRadius, bottomDigitColor)
 
-            val leftText = leftSlotPreview(leftSlotMode, customText, previewState)
+            val leftText = leftSlotPreview(leftSlotMode, customText, previewState, dailyTargetText)
             if (leftText.isNotBlank()) {
                 val textPaint = TextPaint().apply {
                     isAntiAlias = true
                     color = Color.White.copy(alpha = if (ambient) 0.28f else 0.92f).toArgbInt()
-                    textSize = 18.sp.toPx()
+                    textSize = 18.dp.toPx()
                     typeface = yuyuTypeface
                 }
                 val textWidth = 108.dp.roundToPx()
@@ -766,11 +761,11 @@ private fun WatchFacePreview(
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.CENTER
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
-                textSize = 17.sp.toPx()
+                textSize = 17.dp.toPx()
                 color = Color.White.copy(alpha = if (ambient) 0.4f else 0.9f).toArgbInt()
             }
             drawContext.canvas.nativeCanvas.drawText(
-                bottomRightPreview(bottomRightSlotMode, previewState),
+                bottomRightPreview(bottomRightSlotMode, previewState, dailyTargetText),
                 center.x + 16.dp.toPx(),
                 center.y + 112.dp.toPx(),
                 datePaint
@@ -885,28 +880,29 @@ private val previewDigitPatterns = mapOf(
     '9' to listOf(" *** ", "*   *", "*   *", " ****", "    *", "    *", " *** ")
 )
 
-private fun leftSlotPreview(mode: String, customText: String, state: String): String {
+private fun leftSlotPreview(mode: String, customText: String, state: String, dailyTargetText: String): String {
     return when (mode) {
         "hidden" -> ""
-        "custom_text" -> customText.ifBlank { "FOCUS" }
+        "custom_text" -> if (state in listOf("Idle", "Ambient")) customText else ""
         "phase" -> state.uppercase()
         "heart_rate" -> "74 BPM"
         "next_break" -> if (state == "Focus") "NEXT BREAK" else "NEXT FOCUS"
-        "streak" -> "STREAK 0"
-        else -> customText
+        "daily_target" -> dailyTargetText
+        else -> ""
     }
 }
 
-private fun bottomRightPreview(mode: String, state: String): String {
+private fun bottomRightPreview(mode: String, state: String, dailyTargetText: String): String {
     return when (mode) {
         "hidden" -> ""
         "date" -> java.time.LocalDate.now()
-            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.US))
+            .format(java.time.format.DateTimeFormatter.ofPattern("EEE dd", java.util.Locale.US))
             .uppercase()
-        "phase" -> state.uppercase().take(8)
-        "timer" -> "25:00"
+        "phase" -> when (state) { "Short Break" -> "SHORT"; "Long Break" -> "LONG"; "Panic" -> "PANIC"; else -> "FOCUS" }
+        "timer" -> if (state == "Idle") "IDLE" else if (state == "Panic") "PANIC" else previewDigits(state).let { "${it.first}:${it.second}" }
         "battery" -> "WATCH"
-        else -> "THU 09"
+        "daily_target" -> dailyTargetText
+        else -> ""
     }
 }
 

@@ -8,6 +8,7 @@ import com.example.core.goal.DailyFocusGoalSettings
 import com.example.core.protection.DomainProfile
 import com.example.core.protection.DomainProfileStore
 import com.example.core.sync.WatchFaceConfig
+import com.example.core.sync.WatchFaceConfigStore
 import com.example.core.timer.TimerSettings
 import com.example.data.database.AppDatabase
 import com.example.data.database.RestoreSettingsEntity
@@ -24,6 +25,31 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class BackupRepositoryTest {
+    @Test fun faceRestoreWriterFailureRetainsTheJournalUntilItsRetryCompletes() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        var fail = true
+        var calls = 0
+        val settings = BackupSettings(TimerSettings(), DailyFocusGoalSettings(), WatchFaceConfig(customText = "RESTORED"),
+            emptyList(), emptyList(), listOf(DomainProfile(DomainProfileStore.DEFAULT_PROFILE_ID, "Default", emptySet())),
+            DomainProfileStore.DEFAULT_PROFILE_ID, false)
+        withDatabase(context) { database ->
+            val repository = BackupRepository(context, database, restoreFace = { face ->
+                calls++
+                check(!fail) { "Writer unavailable" }
+                WatchFaceConfigStore(context).restore(face.config, face.presets, face.recentColors)
+            })
+            val result = repository.restore(BackupDocument(createdAtEpochMs = 1000, sessions = emptyList(),
+                incidents = emptyList(), tasks = emptyList(), settings = settings))
+            assertTrue(result.settingsPending)
+            assertNotNull(database.restoreSettingsDao().pending())
+            fail = false
+            assertTrue(repository.finishPendingSettings())
+            assertNull(database.restoreSettingsDao().pending())
+            assertEquals(2, calls)
+            assertEquals("RESTORED", WatchFaceConfigStore(context).config.value.customText)
+        }
+    }
+
     @Test
     fun mergesWithoutDuplicatesRecoversSettingsAndRollsBackFailedTransactions() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()

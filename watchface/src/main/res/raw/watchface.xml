@@ -471,6 +471,8 @@
             <Variant mode="AMBIENT" target="alpha" value="0" />
 
             <DefaultProviderPolicy
+                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.BottomRightComplicationService"
+                primaryProviderType="SHORT_TEXT"
                 defaultSystemProvider="DAY_AND_DATE"
                 defaultSystemProviderType="SHORT_TEXT" />
 

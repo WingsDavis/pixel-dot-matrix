@@ -20,6 +20,13 @@ class WatchFaceAmbientTest {
     }
     private val ambientText get() = ambientClock.children().single { it.tagName == "PartText" }
 
+    @Test fun ownedStatusProviderIsTheNewFaceDefaultWithoutRemovingSystemFallback() {
+        val slot = scene.children().single { it.tagName == "ComplicationSlot" && it.getAttribute("slotId") == "104" }
+        val policy = slot.children().single { it.tagName == "DefaultProviderPolicy" }
+        assertEquals("com.aistudio.panicpomodoro.tkrxql/com.example.wear.BottomRightComplicationService", policy.getAttribute("primaryProvider"))
+        assertEquals("DAY_AND_DATE", policy.getAttribute("defaultSystemProvider"))
+    }
+
     @Test fun everyOtherRootVisualIsHiddenInAmbient() {
         assertEquals("WatchFace", watchFace.tagName)
         assertEquals("450", watchFace.getAttribute("width"))

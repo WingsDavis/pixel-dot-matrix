@@ -225,35 +225,12 @@ class WearSyncService : WearableListenerService() {
     }
 
     private fun applyWatchFaceConfig(dataMap: com.google.android.gms.wearable.DataMap) {
-        val schemaVersion = dataMap.getInt(KEY_SCHEMA_VERSION, 1)
-        val revision = dataMap.getString(KEY_REVISION)
-            ?: "legacy-${dataMap.getLong(KEY_TIMESTAMP, System.currentTimeMillis())}"
+        val schemaVersion = runCatching { dataMap.getInt(KEY_SCHEMA_VERSION, 1) }.getOrDefault(-1)
+        val revision = runCatching { dataMap.getString(KEY_REVISION) }.getOrNull()
+            ?: "legacy-${runCatching { dataMap.getLong(KEY_TIMESTAMP, 0L) }.getOrDefault(0)}"
 
         try {
-            val configSaved = getSharedPreferences("watchface_config_prefs", MODE_PRIVATE).edit()
-                .putInt(KEY_SCHEMA_VERSION, schemaVersion)
-                .putString(KEY_REVISION, revision)
-                .putString("timer_color", dataMap.getString("timer_color") ?: "#ff00e5ff")
-                .putString("seconds_color", dataMap.getString("seconds_color") ?: "#ff00e5ff")
-                .putString("idle_time_color", dataMap.getString("idle_time_color") ?: "#ffffffff")
-                .putString("custom_text", dataMap.getString("custom_text") ?: "")
-                .putString("left_slot_mode", dataMap.getString("left_slot_mode") ?: "custom_text")
-                .putString("bottom_right_slot_mode", dataMap.getString("bottom_right_slot_mode") ?: "date")
-                .putBoolean("show_panic_logo", dataMap.getBoolean("show_panic_logo", true))
-                .putString("ambient_style", dataMap.getString("ambient_style") ?: "dim")
-                .putString("theme_preset", dataMap.getString("theme_preset") ?: "cyan")
-                .putLong(KEY_TIMESTAMP, dataMap.getLong(KEY_TIMESTAMP, System.currentTimeMillis()))
-                .commit()
-
-            val complicationTextSaved = getSharedPreferences("pomodoro_sync_prefs", MODE_PRIVATE).edit()
-                .putString("custom_text", dataMap.getString("custom_text") ?: "")
-                .commit()
-
-            if (!configSaved || !complicationTextSaved) {
-                throw IllegalStateException("Wear settings could not be persisted")
-            }
-
-            requestOwnedComplicationUpdates()
+            if (persistWatchFaceConfig(dataMap)) requestOwnedComplicationUpdates()
             publishConfigAcknowledgement(revision, schemaVersion, true, "Complications synced")
             Log.d(
                 TAG,
@@ -268,6 +245,61 @@ class WearSyncService : WearableListenerService() {
             )
             Log.e(TAG, "Failed to apply watch face config revision=$revision", e)
         }
+    }
+
+    internal fun persistWatchFaceConfig(
+        data: com.google.android.gms.wearable.DataMap,
+        preferences: android.content.SharedPreferences = getSharedPreferences("watchface_config_prefs", MODE_PRIVATE)
+    ): Boolean = synchronized(preferences) {
+        val schema = data.getInt(KEY_SCHEMA_VERSION, 1)
+        require(schema in 1..2) { "Unsupported watch-face schema" }
+        if (schema == 2) {
+            require(listOf(KEY_REVISION, KEY_TIMESTAMP, "timer_color", "seconds_color", "idle_time_color",
+                "custom_text", "left_slot_mode", "bottom_right_slot_mode", "show_panic_logo", "ambient_style", "theme_preset")
+                .all(data::containsKey)) { "Incomplete watch-face configuration" }
+        }
+        val timestamp = data.getLong(KEY_TIMESTAMP, 0L)
+        val revision = data.getString(KEY_REVISION) ?: "legacy-$timestamp"
+        require(revision.isNotBlank() && revision.length <= 256 && revision.none(Char::isISOControl)) { "Invalid configuration revision" }
+        require(timestamp >= 0L && (schema == 1 || timestamp > 0L)) { "Invalid configuration timestamp" }
+        check(schema >= preferences.getInt(KEY_SCHEMA_VERSION, 1)) { "Legacy configuration cannot replace a newer schema" }
+        if (revision == preferences.getString(KEY_REVISION, null)) return@synchronized false
+        check(timestamp >= preferences.getLong(KEY_TIMESTAMP, 0L)) { "A newer configuration is already saved" }
+        fun color(key: String, fallback: String): String = (data.getString(key) ?: fallback).also {
+            require(it.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?"))) { "Invalid configuration color" }
+        }.lowercase()
+        val left = data.getString("left_slot_mode") ?: "custom_text"
+        val bottom = data.getString("bottom_right_slot_mode") ?: "date"
+        val ambient = data.getString("ambient_style") ?: "dim"
+        require(left in setOf("custom_text", "phase", "heart_rate", "next_break", "streak", "daily_target", "hidden")) { "Invalid left slot mode" }
+        require(bottom in setOf("date", "phase", "timer", "battery", "daily_target", "hidden")) { "Invalid bottom slot mode" }
+        require(ambient in setOf("dim", "minimal")) { "Invalid ambient preference" }
+        val next = mapOf<String, Any>(KEY_SCHEMA_VERSION to schema, KEY_REVISION to revision, KEY_TIMESTAMP to timestamp,
+            "timer_color" to color("timer_color", "#ffff9800"), "seconds_color" to color("seconds_color", "#ffff9800"),
+            "idle_time_color" to color("idle_time_color", "#ffffffff"), "custom_text" to data.getString("custom_text").orEmpty(),
+            "left_slot_mode" to left, "bottom_right_slot_mode" to bottom, "ambient_style" to ambient,
+            "show_panic_logo" to data.getBoolean("show_panic_logo", true), "theme_preset" to data.getString("theme_preset").orEmpty())
+        val previous = preferences.all.toMap()
+        try {
+            check(writeFacePreferences(preferences, next)) { "Wear settings could not be persisted" }
+        } catch (error: Exception) {
+            runCatching { writeFacePreferences(preferences, previous) }
+            throw error
+        }
+        true
+    }
+
+    private fun writeFacePreferences(preferences: android.content.SharedPreferences, values: Map<String, *>): Boolean {
+        val editor = preferences.edit().clear()
+        values.forEach { (key, value) -> when (value) {
+            is String -> editor.putString(key, value)
+            is Boolean -> editor.putBoolean(key, value)
+            is Long -> editor.putLong(key, value)
+            is Int -> editor.putInt(key, value)
+            is Float -> editor.putFloat(key, value)
+            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+        } }
+        return editor.commit()
     }
 
     private fun publishConfigAcknowledgement(

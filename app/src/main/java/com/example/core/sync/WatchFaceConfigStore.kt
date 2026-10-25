@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -35,7 +36,8 @@ data class WatchFaceConfig(
     val bottomRightSlotMode: String = "date",
     val ambientStyle: String = "dim",
     val localRevision: String? = null,
-    val appliedRevision: String? = null
+    val appliedRevision: String? = null,
+    val updatedAtEpochMs: Long = 0L
 )
 
 private val Context.watchFaceConfigDataStore by preferencesDataStore(
@@ -54,36 +56,46 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
     private val _recentColors = MutableStateFlow(readRecentColors(initialPreferences))
     val recentColors: StateFlow<List<String>> = _recentColors.asStateFlow()
 
-    fun save(config: WatchFaceConfig) {
+    @Synchronized fun save(config: WatchFaceConfig) {
         runBlocking(Dispatchers.IO) {
             dataStore.edit { writeConfig(it, config) }
         }
         _config.value = config
     }
 
-    fun markApplied(revision: String) = save(_config.value.copy(appliedRevision = revision))
+    @Synchronized fun markApplied(revision: String) {
+        if (_config.value.localRevision == revision) save(_config.value.copy(appliedRevision = revision))
+    }
 
     fun hasUnsyncedChanges(): Boolean = _config.value.localRevision != null &&
         _config.value.localRevision != _config.value.appliedRevision
 
-    fun reset(): WatchFaceConfig = WatchFaceConfig().also(::save)
+    @Synchronized fun reset(): WatchFaceConfig = WatchFaceConfig(updatedAtEpochMs = _config.value.updatedAtEpochMs).also(::save)
 
     fun preset(id: String): WatchFacePreset? = BUILT_IN_PRESETS[id]?.let { WatchFacePreset(id, id, it) }
         ?: _presets.value.firstOrNull { it.id == id }
 
-    fun savePreset(name: String, config: WatchFaceConfig): WatchFacePreset {
-        val preset = WatchFacePreset(java.util.UUID.randomUUID().toString(), name.trim(), config.withoutRevisions())
+    @Synchronized fun savePreset(name: String, config: WatchFaceConfig): WatchFacePreset {
+        val preset = WatchFacePreset(java.util.UUID.randomUUID().toString(), validPresetName(name), config.withoutRevisions())
         writePresets(_presets.value + preset)
         return preset
     }
 
     fun duplicatePreset(id: String, name: String): WatchFacePreset? = preset(id)?.let { savePreset(name, it.config) }
 
-    fun renamePreset(id: String, name: String) {
-        writePresets(_presets.value.map { if (it.id == id) it.copy(name = name.trim()) else it })
+    @Synchronized fun renamePreset(id: String, name: String) {
+        if (id in BUILT_IN_PRESETS) return
+        val trimmed = validPresetName(name)
+        writePresets(_presets.value.map { if (it.id == id) it.copy(name = trimmed) else it })
     }
 
-    fun deletePreset(id: String) = writePresets(_presets.value.filterNot { it.id == id })
+    @Synchronized fun deletePreset(id: String) {
+        if (id !in BUILT_IN_PRESETS) writePresets(_presets.value.filterNot { it.id == id })
+    }
+
+    private fun validPresetName(name: String): String = name.trim().also {
+        require(it.isNotEmpty() && it.length <= 64 && it.none(Char::isISOControl)) { "Use a preset name of 1-64 characters" }
+    }
 
     fun rememberColor(hex: String) {
         val colors = (listOf(hex) + _recentColors.value).distinct().take(8)
@@ -92,7 +104,8 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
     }
 
     fun restore(config: WatchFaceConfig, presets: List<WatchFacePreset>, recentColors: List<String>) {
-        val restored = config.copy(localRevision = "restore-${java.util.UUID.randomUUID()}", appliedRevision = null)
+        val restored = config.copy(localRevision = "restore-${java.util.UUID.randomUUID()}", appliedRevision = null,
+            updatedAtEpochMs = maxOf(config.updatedAtEpochMs, _config.value.updatedAtEpochMs))
         runBlocking(Dispatchers.IO) {
             dataStore.edit { preferences ->
                 writeConfig(preferences, restored)
@@ -113,6 +126,7 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
         preferences[LEFT_SLOT_MODE] = config.leftSlotMode
         preferences[BOTTOM_RIGHT_SLOT_MODE] = config.bottomRightSlotMode
         preferences[AMBIENT_STYLE] = config.ambientStyle
+        preferences[UPDATED_AT] = config.updatedAtEpochMs
         config.localRevision?.let { preferences[LOCAL_REVISION] = it } ?: preferences.remove(LOCAL_REVISION)
         config.appliedRevision?.let { preferences[APPLIED_REVISION] = it } ?: preferences.remove(APPLIED_REVISION)
     }
@@ -144,11 +158,13 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
         bottomRightSlotMode = preferences[BOTTOM_RIGHT_SLOT_MODE] ?: "date",
         ambientStyle = preferences[AMBIENT_STYLE] ?: "dim",
         localRevision = preferences[LOCAL_REVISION],
-        appliedRevision = preferences[APPLIED_REVISION]
+        appliedRevision = preferences[APPLIED_REVISION],
+        updatedAtEpochMs = preferences[UPDATED_AT] ?: 0L
     )
 
     private fun readPresets(preferences: Preferences): List<WatchFacePreset> =
         preferences[USER_PRESETS].orEmpty().mapNotNull(::decodePreset)
+            .filter { it.id.isNotBlank() && it.id !in BUILT_IN_PRESETS && it.name.isNotBlank() }.distinctBy { it.id }
 
     private fun readRecentColors(preferences: Preferences): List<String> = preferences[RECENT_COLORS].orEmpty().toList()
 
@@ -192,7 +208,7 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
         )
     }.getOrNull()
 
-    private fun WatchFaceConfig.withoutRevisions() = copy(localRevision = null, appliedRevision = null)
+    private fun WatchFaceConfig.withoutRevisions() = copy(localRevision = null, appliedRevision = null, updatedAtEpochMs = 0L)
 
     companion object {
         val BUILT_IN_PRESETS = mapOf(
@@ -213,6 +229,7 @@ class WatchFaceConfigStore(private val dataStore: DataStore<Preferences>) {
         private val AMBIENT_STYLE = stringPreferencesKey("ambient_style")
         private val LOCAL_REVISION = stringPreferencesKey("local_revision")
         private val APPLIED_REVISION = stringPreferencesKey("applied_revision")
+        private val UPDATED_AT = longPreferencesKey("updated_at")
         private val USER_PRESETS = stringSetPreferencesKey("user_presets")
         private val RECENT_COLORS = stringSetPreferencesKey("recent_colors")
     }

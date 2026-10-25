@@ -8,6 +8,8 @@ import java.io.File
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -17,6 +19,47 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class WatchFaceConfigStoreTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
+
+    @Test fun userPresetCrudPersistsAllFieldsAndCannotChangeBuiltIns() = runTest {
+        val dataStore = PreferenceDataStoreFactory.create(produceFile = { tempFile("preset-crud") })
+        val store = WatchFaceConfigStore(dataStore)
+        val config = WatchFaceConfig("#ff42a5f5", "#ff81c784", "#ffef5350", "CUSTOM", false,
+            "focus", "daily_target", "timer", "minimal", "local", "applied", 100)
+        val saved = store.savePreset("  Work  ", config)
+        assertEquals("Work", saved.name)
+        assertEquals(config.copy(localRevision = null, appliedRevision = null, updatedAtEpochMs = 0), saved.config)
+        val copy = store.duplicatePreset(saved.id, "Copy")!!
+        assertTrue(saved.id != copy.id)
+        store.renamePreset(copy.id, "Renamed")
+        store.deletePreset(saved.id)
+        val recreated = WatchFaceConfigStore(dataStore)
+        assertEquals(listOf(copy.copy(name = "Renamed")), recreated.presets.value)
+        WatchFaceConfigStore.BUILT_IN_PRESETS.forEach { (id, expected) ->
+            recreated.renamePreset(id, "Wrong")
+            recreated.deletePreset(id)
+            assertEquals(expected, recreated.preset(id)!!.config)
+        }
+        val duplicateBuiltIn = recreated.duplicatePreset("original", "Original copy")!!
+        assertTrue(duplicateBuiltIn.id != "original")
+        assertEquals(WatchFaceConfig(), duplicateBuiltIn.config)
+    }
+
+    @Test fun invalidNamesAndLateAcknowledgementsCannotMutateSavedSettings() = runTest {
+        val dataStore = PreferenceDataStoreFactory.create(produceFile = { tempFile("preset-invalid") })
+        val store = WatchFaceConfigStore(dataStore)
+        listOf("  ", "bad\nname", "a".repeat(65)).forEach { name ->
+            assertThrows(IllegalArgumentException::class.java) { store.savePreset(name, WatchFaceConfig()) }
+        }
+        assertTrue(store.presets.value.isEmpty())
+        val latest = WatchFaceConfig(localRevision = "latest", appliedRevision = "older", updatedAtEpochMs = 123)
+        store.save(latest)
+        store.markApplied("older")
+        assertEquals(latest, store.config.value)
+        assertEquals(123L, WatchFaceConfigStore(dataStore).config.value.updatedAtEpochMs)
+        assertEquals(123L, store.reset().updatedAtEpochMs)
+        store.restore(WatchFaceConfig(), emptyList(), emptyList())
+        assertEquals(123L, store.config.value.updatedAtEpochMs)
+    }
 
     @Test
     fun fullEditorModelAndIndependentRevisionsSurviveRecreation() = runTest {
@@ -84,5 +127,5 @@ class WatchFaceConfigStoreTest {
     }
 
     private fun tempFile(name: String): File =
-        File.createTempFile("watchface-$name-", ".preferences_pb").apply { delete() }
+        File.createTempFile("watchface-$name-", ".preferences_pb").apply { delete(); deleteOnExit() }
 }

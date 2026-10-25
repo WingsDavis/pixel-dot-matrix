@@ -1,6 +1,7 @@
 # Pixel Dot Matrix
 
 Watch-face ambient behavior and validation: [Ambient safeguards](docs/AMBIENT.md).
+Preset ownership and synchronization: [Presets](docs/PRESETS.md).
 
 Pixel Dot Matrix is an open-source, local-first Pomodoro system for Android
 phones and Wear OS. The repository contains a phone companion, a circular

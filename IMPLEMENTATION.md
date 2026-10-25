@@ -183,7 +183,7 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   - A watch acknowledgement only advances `appliedRevision`; it does not replace newer local edits.
   - Reset restores every built-in default, sends a logo-reset DataItem, and applies a new revision to the watch.
 * **Editor completeness (`WearScreen.kt`)**:
-  - Left-slot mode, bottom-right mode, and ambient style are editable and included in previews, drafts, presets, replay, reset, and sync payloads.
+  - Left-slot and bottom-right owned content modes are included in previews, drafts, presets, replay, reset, and sync payloads. The legacy ambient preference is retained for compatibility; the deployed WFF ambient layout remains authoritative.
   - The phone model is independent of the WFF package lifecycle, so reinstalling or updating the watch face cannot erase the saved phone configuration.
 
 ### Feature 12: Session Automation
@@ -375,6 +375,17 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   retryable. Phone action receipts remain separate from vibration feedback.
 - Physical strength, pattern distinction, and ambient hardware evaluation are
   pending. Automated evidence is recorded in `docs/HAPTICS.md`.
+
+### Watch-Face Presets (Roadmap Item 15)
+
+- Protected built-ins and user CRUD persist all supported preset fields.
+- Preset apply, drafts, replay, and reset use one ordered configuration writer;
+  exact revision/timestamp snapshots are persisted before publication.
+- Stale drafts/receipts and late failures cannot replace newer local settings.
+  Receiver validation and one-file commit protect the previous watch config.
+- Phone preview clears old custom overrides, renders stored palettes and owned
+  content, and uses the same ambient content policy. Native colors and provider
+  choices remain editor-owned; see `docs/PRESETS.md`.
 
 When working on this project, verify and build on top of these files:
 

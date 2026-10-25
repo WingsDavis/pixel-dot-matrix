@@ -603,7 +603,7 @@ class TimerRuntime internal constructor(
         _goalSettings.value = goal
         _settingsPending.value = false
         refreshGoalClock()
-        syncManager.refreshRestoredWatchFaceSettings()
+        syncManager.refreshRestoredWatchFaceSettings().join()
         syncManager.pushStateToWearable(force = true)
     }
 
