@@ -162,24 +162,6 @@
             </Group>
         </Group>
 
-        <!-- User-selected logo, supplied by the Wear app with ws_logo as fallback. -->
-        <ComplicationSlot slotId="105" x="185" y="10" width="80" height="80"
-            supportedTypes="SMALL_IMAGE">
-            <Variant mode="AMBIENT" target="alpha" value="0" />
-
-            <DefaultProviderPolicy
-                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.LogoComplicationService"
-                primaryProviderType="SMALL_IMAGE"
-                defaultSystemProvider="EMPTY" defaultSystemProviderType="SMALL_IMAGE" />
-
-            <Complication type="SMALL_IMAGE">
-                <PartImage x="0" y="0" width="80" height="80">
-                    <Image resource="[COMPLICATION.SMALL_IMAGE]" />
-                </PartImage>
-            </Complication>
-            <BoundingBox x="0" y="0" width="80" height="80" />
-        </ComplicationSlot>
-
         <!-- Pomodoro Progress Complication (Left Edge) -->
         <ComplicationSlot slotId="103" x="0" y="0" width="450" height="450"
             supportedTypes="RANGED_VALUE">
@@ -542,16 +524,20 @@
             </PartDraw>
         </Group>
 
-        <!-- Above the full-face timer slot so the logo remains independently tappable. -->
-        <Group name="LogoTapTarget" x="185" y="10" width="80" height="80">
+        <!-- Last interactive slot: its provider owns the visible logo's tap action. -->
+        <ComplicationSlot slotId="105" x="185" y="10" width="80" height="80" supportedTypes="SMALL_IMAGE">
             <Variant mode="AMBIENT" target="alpha" value="0" />
-            <PartDraw x="0" y="0" width="80" height="80">
-                <Rectangle x="0" y="0" width="80" height="80">
-                    <Fill color="#00000000" />
-                </Rectangle>
-                <Launch target="panic://trigger" />
-            </PartDraw>
-        </Group>
+            <DefaultProviderPolicy
+                primaryProvider="com.aistudio.panicpomodoro.tkrxql/com.example.wear.LogoComplicationService"
+                primaryProviderType="SMALL_IMAGE"
+                defaultSystemProvider="EMPTY" defaultSystemProviderType="SMALL_IMAGE" />
+            <Complication type="SMALL_IMAGE">
+                <PartImage x="0" y="0" width="80" height="80">
+                    <Image resource="[COMPLICATION.SMALL_IMAGE]" />
+                </PartImage>
+            </Complication>
+            <BoundingBox x="0" y="0" width="80" height="80" />
+        </ComplicationSlot>
 
         <!-- System burn-in shifting has a generous margin; ambient never depends on complication delivery. -->
         <Group name="AmbientClock" x="0" y="0" width="450" height="450" alpha="0">

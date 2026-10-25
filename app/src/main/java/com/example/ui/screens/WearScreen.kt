@@ -5,8 +5,6 @@ package com.example.ui.screens
 import android.content.Context
 import android.content.ComponentName
 import android.content.Intent
-import android.graphics.BitmapFactory
-import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.net.Uri
 import android.text.Layout
@@ -21,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -66,7 +65,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -79,6 +77,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +88,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.core.sync.WatchFaceSyncPhase
 import com.example.core.sync.WatchFaceConfig
+import com.example.core.sync.LogoUiState
+import com.example.core.sync.LogoSyncPhase
+import com.example.core.media.LogoFit
+import com.example.core.media.LogoTransform
+import com.example.R
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.example.data.entity.SyncOutboxEntity
 import com.example.ui.viewmodel.PomodoroViewModel
 
@@ -140,6 +146,7 @@ fun WearScreen(
     val userPresets by viewModel.watchFacePresets.collectAsState()
     val recentColors by viewModel.watchFaceRecentColors.collectAsState()
     val dailyProgress by viewModel.dailyFocusProgress.collectAsState()
+    val logoState by viewModel.watchFaceLogoState.collectAsState()
     var previewState by remember { mutableStateOf("Idle") }
     val hourColor = studioColorFor(editorConfig.hourColor, "orange")
     val minuteColor = studioColorFor(editorConfig.minuteColor, "white")
@@ -150,10 +157,6 @@ fun WearScreen(
     val leftSlotMode = editorConfig.leftSlotMode
     val bottomRightSlotMode = editorConfig.bottomRightSlotMode
     val ambientStyle = editorConfig.ambientStyle
-    var customLogo by remember { mutableStateOf<Bitmap?>(null) }
-    var logoZoom by remember { mutableStateOf(1f) }
-    var logoOffsetX by remember { mutableStateOf(0f) }
-    var logoOffsetY by remember { mutableStateOf(0f) }
     var customHex by remember { mutableStateOf("") }
     var customPreviewColor by remember { mutableStateOf<Color?>(null) }
     var presetDialog by remember { mutableStateOf<String?>(null) }
@@ -166,17 +169,7 @@ fun WearScreen(
         viewModel.applyWatchFacePreset(id)
     }
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            customLogo = decodeLogoPreview(context, uri)
-            if (customLogo == null) {
-                Toast.makeText(context, "Unsupported or corrupt image", Toast.LENGTH_LONG).show()
-            } else {
-                logoZoom = 1f
-                logoOffsetX = 0f
-                logoOffsetY = 0f
-                Toast.makeText(context, "Logo ready to apply", Toast.LENGTH_SHORT).show()
-            }
-        }
+        if (uri != null) viewModel.selectWatchFaceLogo(uri)
     }
 
     LaunchedEffect(presetDialog) { presetError = null }
@@ -247,10 +240,7 @@ fun WearScreen(
             leftSlotMode = leftSlotMode,
             bottomRightSlotMode = bottomRightSlotMode,
             showPanicLogo = showPanicLogo,
-            logoBitmap = customLogo?.asImageBitmap(),
-            logoScale = logoZoom,
-            logoOffsetX = logoOffsetX,
-            logoOffsetY = logoOffsetY,
+            logoBitmap = logoState.document?.rendered?.asImageBitmap(),
             ambient = previewState == "Ambient",
             dailyTargetText = dailyProgress.takeIf { it.settings.enabled }?.shortText.orEmpty(),
             modifier = Modifier
@@ -302,34 +292,19 @@ fun WearScreen(
                 }
             )
             ToggleRow(
-                label = "Panic logo",
+                label = "Show logo",
                 checked = showPanicLogo,
                 onCheckedChange = { value -> viewModel.editWatchFaceDraft { it.copy(showLogo = value) } }
             )
-            OutlinedButton(
-                onClick = { logoPicker.launch("image/*") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Default.Image, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Choose Logo")
-            }
-            if (customLogo != null) {
-                Text("Logo framing", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text("Zoom", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
-                Slider(value = logoZoom, onValueChange = { logoZoom = it }, valueRange = 1f..2f)
-                Text("Horizontal", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
-                Slider(value = logoOffsetX, onValueChange = { logoOffsetX = it }, valueRange = -0.3f..0.3f)
-                Text("Vertical", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
-                Slider(value = logoOffsetY, onValueChange = { logoOffsetY = it }, valueRange = -0.3f..0.3f)
-                OutlinedButton(onClick = { viewModel.syncWatchFaceLogo(customLogo!!, logoZoom, logoOffsetX, logoOffsetY) }, modifier = Modifier.fillMaxWidth()) { Text("Apply Logo Framing") }
-            }
+            WatchFaceLogoControls(logoState,
+                onChoose = { logoPicker.launch("image/*") },
+                onEdit = { viewModel.editWatchFaceLogo(it) },
+                onApply = { viewModel.applyWatchFaceLogo() },
+                onRetry = { viewModel.retryWatchFaceLogo() },
+                onReset = { viewModel.resetWatchFaceLogo() })
             OutlinedButton(
                 onClick = {
-                    customLogo = null
                     viewModel.resetWatchFace()
-                    Toast.makeText(context, "Watch face reset to defaults", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp)
@@ -570,7 +545,8 @@ private fun StudioChipRow(
     values: List<String>,
     selectedValue: String,
     onSelected: (String) -> Unit,
-    labels: Map<String, String> = emptyMap()
+    labels: Map<String, String> = emptyMap(),
+    enabled: Boolean = true
 ) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -578,6 +554,7 @@ private fun StudioChipRow(
     ) {
         values.forEach { value ->
             FilterChip(
+                enabled = enabled,
                 selected = value == selectedValue,
                 onClick = { onSelected(value) },
                 label = { Text(labels[value] ?: value.toStudioLabel(), maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -623,10 +600,64 @@ private fun ColorSwatches(
 }
 
 @Composable
+internal fun WatchFaceLogoControls(
+    state: LogoUiState,
+    onChoose: () -> Unit,
+    onEdit: ((LogoTransform) -> LogoTransform) -> Unit,
+    onApply: () -> Unit,
+    onRetry: () -> Unit,
+    onReset: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = onChoose, enabled = !state.busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+            Icon(Icons.Default.Image, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (state.busy) "Opening image" else "Choose Logo")
+        }
+        state.document?.let { document ->
+            val pose = document.transform
+            Box(Modifier.size(128.dp).align(Alignment.CenterHorizontally)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val step = size.width / 8f
+                    for (row in 0..7) for (column in 0..7) drawRect(
+                        if ((row + column) % 2 == 0) Color(0xFF333333) else Color(0xFF777777),
+                        Offset(column * step, row * step), Size(step, step))
+                }
+                Image(document.rendered.asImageBitmap(), contentDescription = "Rendered logo preview",
+                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+            StudioChipRow(listOf("FIT", "FILL"), pose.fit.name,
+                onSelected = { value -> onEdit { it.copy(fit = LogoFit.valueOf(value)) } },
+                labels = mapOf("FIT" to "Fit", "FILL" to "Fill"), enabled = !state.busy)
+            Text("Zoom", fontSize = 12.sp, color = Color.White)
+            Slider(pose.zoom, onValueChange = { value -> onEdit { it.copy(zoom = value) } }, valueRange = 1f..4f,
+                enabled = !state.busy, modifier = Modifier.semantics { contentDescription = "Logo zoom" })
+            Text("Horizontal", fontSize = 12.sp, color = Color.White)
+            Slider(pose.panX, onValueChange = { value -> onEdit { it.copy(panX = value) } }, valueRange = -1f..1f,
+                enabled = !state.busy, modifier = Modifier.semantics { contentDescription = "Logo horizontal position" })
+            Text("Vertical", fontSize = 12.sp, color = Color.White)
+            Slider(pose.panY, onValueChange = { value -> onEdit { it.copy(panY = value) } }, valueRange = -1f..1f,
+                enabled = !state.busy, modifier = Modifier.semantics { contentDescription = "Logo vertical position" })
+            ToggleRow("Transparent padding", pose.transparent,
+                onCheckedChange = { value -> onEdit { it.copy(transparent = value) } }, enabled = !state.busy)
+            Button(onClick = onApply, enabled = !state.busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) { Text("Apply Logo") }
+        }
+        Text(state.message, fontSize = 12.sp, color = when (state.phase) {
+            LogoSyncPhase.APPLIED -> Color(0xFF81C784)
+            LogoSyncPhase.FAILED -> Color(0xFFEF5350)
+            else -> Color.White.copy(alpha = 0.7f)
+        })
+        if (state.canRetry) OutlinedButton(onClick = onRetry, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Retry transfer") }
+        OutlinedButton(onClick = onReset, enabled = !state.busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) { Text("Reset Logo") }
+    }
+}
+
+@Composable
 private fun ToggleRow(
     label: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -634,7 +665,7 @@ private fun ToggleRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, color = Color.White, fontWeight = FontWeight.SemiBold)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -649,9 +680,6 @@ internal fun WatchFacePreview(
     bottomRightSlotMode: String,
     showPanicLogo: Boolean,
     logoBitmap: ImageBitmap?,
-    logoScale: Float = 1f,
-    logoOffsetX: Float = 0f,
-    logoOffsetY: Float = 0f,
     ambient: Boolean,
     dailyTargetText: String = "",
     modifier: Modifier = Modifier
@@ -663,8 +691,12 @@ internal fun WatchFacePreview(
     }
     val dotTypeface = remember(context) { Typeface.createFromAsset(context.assets, "ndot.ttf") }
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.size(286.dp)) {
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        val faceDiameter = minOf(286.dp, maxWidth, maxHeight)
+        val logoModifier = Modifier.align(Alignment.TopCenter)
+            .padding(top = (maxHeight - faceDiameter) / 2f + faceDiameter * (10f / 450f))
+            .size(faceDiameter * (80f / 450f))
+        Canvas(modifier = Modifier.size(faceDiameter)) {
             val diameter = size.minDimension
             val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
             drawCircle(color = if (ambient) Color.Black else Color(0xFF050505), radius = diameter / 2f)
@@ -776,51 +808,16 @@ internal fun WatchFacePreview(
                 Image(
                     bitmap = logoBitmap,
                     contentDescription = "Selected watch face logo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 30.dp)
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .graphicsLayer {
-                            scaleX = logoScale
-                            scaleY = logoScale
-                            translationX = logoOffsetX * 52.dp.toPx()
-                            translationY = logoOffsetY * 52.dp.toPx()
-                        }
+                    contentScale = ContentScale.Fit,
+                    modifier = logoModifier
                 )
             } else {
-                Text(
-                    text = "W$",
-                    color = Color(0xFF50C94D),
-                    fontSize = 28.sp,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 30.dp)
-                        .background(Color(0xFF070A08), RoundedCornerShape(2.dp))
-                        .padding(horizontal = 9.dp, vertical = 4.dp)
-                )
+                Image(painter = painterResource(R.drawable.ws_logo), contentDescription = "Default watch face logo",
+                    contentScale = ContentScale.Fit, modifier = logoModifier)
             }
         }
     }
 }
-
-private fun decodeLogoPreview(context: Context, uri: Uri): Bitmap? = runCatching {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    context.contentResolver.openInputStream(uri)?.use {
-        BitmapFactory.decodeStream(it, null, bounds)
-    }
-    var sampleSize = 1
-    while (bounds.outWidth > 0 && bounds.outHeight > 0 &&
-        (bounds.outWidth / sampleSize > 512 || bounds.outHeight / sampleSize > 512)
-    ) {
-        sampleSize *= 2
-    }
-    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-    }
-}.getOrNull()
 
 private fun normalizeHexColor(raw: String): String? {
     val value = raw.trim().removePrefix("#")

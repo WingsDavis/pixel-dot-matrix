@@ -27,10 +27,7 @@ import com.example.domain.FocusInsights
 import com.example.domain.InsightsCalculator
 import com.example.domain.InsightsFilter
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
+import com.example.core.media.LogoTransform
 import android.net.Uri
 import android.net.VpnService
 import android.util.Log
@@ -113,6 +110,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
     val watchFaceEditorConfig = wearableSyncManager.watchFaceEditorConfig
     val watchFacePresets = wearableSyncManager.watchFacePresets
     val watchFaceRecentColors = wearableSyncManager.watchFaceRecentColors
+    val watchFaceLogoState = wearableSyncManager.watchFaceLogoState
     val syncOutboxItems = wearableSyncManager.syncOutboxItems
     val connectedWatchCount = wearableSyncManager.connectedNodeCount
 
@@ -574,62 +572,17 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun syncWatchFaceLogo(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val resolver = getApplication<Application>().contentResolver
-                val source = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-                    ?: throw IllegalArgumentException("Unable to decode selected image")
-                val side = minOf(source.width, source.height)
-                val cropped = Bitmap.createBitmap(
-                    source,
-                    (source.width - side) / 2,
-                    (source.height - side) / 2,
-                    side,
-                    side
-                )
-                val scaled = Bitmap.createScaledBitmap(cropped, WATCH_FACE_LOGO_SIZE, WATCH_FACE_LOGO_SIZE, true)
-                val bytes = ByteArrayOutputStream().use { output ->
-                    scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
-                    output.toByteArray()
-                }
-                syncWatchFaceLogo(source, 1f, 0f, 0f)
-            } catch (e: Exception) {
-                Log.e("PomodoroViewModel", "Failed to prepare custom watch face logo", e)
-            }
-        }
-    }
-
-    fun syncWatchFaceLogo(source: Bitmap, zoom: Float, offsetX: Float, offsetY: Float) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val side = minOf(source.width, source.height)
-                val square = Bitmap.createBitmap(source, (source.width - side) / 2, (source.height - side) / 2, side, side)
-                val output = Bitmap.createBitmap(WATCH_FACE_LOGO_SIZE, WATCH_FACE_LOGO_SIZE, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(output)
-                val scaledSide = (WATCH_FACE_LOGO_SIZE * zoom.coerceIn(1f, 2f)).toInt()
-                val scaled = Bitmap.createScaledBitmap(square, scaledSide, scaledSide, true)
-                val left = (WATCH_FACE_LOGO_SIZE - scaledSide) / 2f + offsetX.coerceIn(-0.3f, 0.3f) * WATCH_FACE_LOGO_SIZE
-                val top = (WATCH_FACE_LOGO_SIZE - scaledSide) / 2f + offsetY.coerceIn(-0.3f, 0.3f) * WATCH_FACE_LOGO_SIZE
-                canvas.drawBitmap(scaled, left, top, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                val bytes = ByteArrayOutputStream().use { outputStream ->
-                    output.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-                    outputStream.toByteArray()
-                }
-                wearableSyncManager.pushWatchFaceLogo(bytes)
-            }.onFailure { error -> Log.e("PomodoroViewModel", "Failed to sync transformed logo", error) }
-        }
-    }
+    fun selectWatchFaceLogo(uri: Uri) = wearableSyncManager.selectWatchFaceLogo(uri)
+    fun editWatchFaceLogo(update: (LogoTransform) -> LogoTransform) = wearableSyncManager.editWatchFaceLogo(update)
+    fun applyWatchFaceLogo() = wearableSyncManager.applyWatchFaceLogo()
+    fun retryWatchFaceLogo() = wearableSyncManager.retryWatchFaceLogo()
+    fun resetWatchFaceLogo() = wearableSyncManager.resetWatchFaceLogo()
 
     // Support step simulation for manual trigger and easy testing
     fun incrementStepsSimulated() {
         if (currentState.value == PomodoroState.PANIC_MODE) {
             runtime.setSteps(stepsTakenInPanic.value + 5)
         }
-    }
-
-    companion object {
-        private const val WATCH_FACE_LOGO_SIZE = 256
     }
 
     fun setSteps(steps: Int) {

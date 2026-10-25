@@ -459,10 +459,34 @@ Pixel Watch, relevant automated tests pass, and `IMPLEMENTATION.md` is updated.
 - Validate dimensions, decoded memory use, and transfer size.
 
 **Acceptance criteria**
-- [ ] Portrait, landscape, square, transparent, and large images render safely.
+- [x] Portrait, landscape, square, transparent, and large images render safely.
 - [ ] Reset deletes custom media and immediately restores `ws_logo`.
-- [ ] Preview and watch use the same crop transform.
-- [ ] Corrupt or unsupported images fail with a useful message.
+- [x] Preview and watch use the same crop transform.
+- [x] Corrupt or unsupported images fail with a useful message.
+
+**Implementation and verification**
+- A bounded normalized source and atomic manifest preserve fit/fill, zoom,
+  pan, and transparent padding. Preview/export use one 128px rendered PNG.
+- Local image edits run in invocation order. Reset intent is durable before
+  deletion, interrupted cleanup recovers on restart, and newer selections cannot
+  be erased by older cleanup retries.
+- Watch storage validates PNG/schema/order/checksum before an applied receipt.
+  Hidden logos use transparent image data with no tap action; the independent
+  invisible launch overlay is removed. The default preview uses the real asset.
+- Native image tests cover geometry, alpha, EXIF, decode/memory bounds, corrupt
+  input, recreation, write failure, queue ordering, and reset recovery. Android
+  9+ uses strict partial-image rejection; older decoding compatibility is noted
+  in [Logos](docs/LOGOS.md).
+- Actual phone-to-watch crop appearance, provider binding, hidden-logo taps,
+  and offline reset/reinstall checks remain pending. The reset checkbox stays
+  open until that physical verification; no watch result is inferred from ACKs.
+- Final automated gate: 229 phone and 157 Wear tests pass, all three APKs and
+  phone instrumentation sources build, and official WFF v2 schema/memory checks
+  pass. No physical-device installation or testing was performed in this pass.
+
+**Current stopping point**
+- Stop after item 16 at the user's request. Items 17-20 still need completion;
+  earlier device-only checks remain open. Do not start item 17 automatically.
 
 ### 17. Custom Color Support `[~]`
 

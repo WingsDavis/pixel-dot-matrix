@@ -255,7 +255,7 @@ class WearComplicationProvidersTest {
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    fun corruptLogoFallsBackAndHiddenLogoReturnsNoData() {
+    fun corruptLogoFallsBackAndHiddenLogoReturnsTransparentSmallImage() {
         val provider = create(LogoComplicationService::class.java)
         File(context.filesDir, WearSyncService.LOGO_FILENAME).writeText("not an image")
         for (data in listOf(provider.getPreviewData(ComplicationType.SMALL_IMAGE)!!, request(provider, ComplicationType.SMALL_IMAGE)!!)) {
@@ -265,7 +265,16 @@ class WearComplicationProvidersTest {
             assertTap(data, ComplicationActions.openPanic(context))
         }
         config.edit().putBoolean("show_panic_logo", false).commit()
-        assertTrue(request(provider, ComplicationType.SMALL_IMAGE) is NoDataComplicationData)
+        val hidden = request(provider, ComplicationType.SMALL_IMAGE) as SmallImageComplicationData
+        assertEquals(ComplicationType.SMALL_IMAGE, hidden.type)
+        assertNull(hidden.tapAction)
+        val icon = hidden.smallImage.image
+        assertEquals(Icon.TYPE_BITMAP, icon.type)
+        val bitmap = (icon.loadDrawable(provider) as android.graphics.drawable.BitmapDrawable).bitmap
+        assertEquals(1, bitmap.width)
+        assertEquals(1, bitmap.height)
+        assertEquals(android.graphics.Bitmap.Config.ARGB_8888, bitmap.config)
+        assertEquals(android.graphics.Color.TRANSPARENT, bitmap.getPixel(0, 0))
     }
 
     @Test

@@ -387,6 +387,20 @@ Triggers physical warnings directly on the wrist *before* the user breaks focus,
   content, and uses the same ambient content policy. Native colors and provider
   choices remain editor-owned; see `docs/PRESETS.md`.
 
+### Logo Controls (Roadmap Item 16)
+
+- One bounded, EXIF-normalized source and atomic framing manifest survive app
+  recreation. Fit/fill, pan, zoom, and transparent padding share a 128px renderer.
+- Phone preview and exported PNG use the same rendered bitmap; no second UI crop
+  is applied. Both apps use the same built-in logo asset as fallback.
+- Durable transfer state distinguishes local edits, queued requests, stored
+  acknowledgements, and failures. Stale receipts cannot apply newer local edits.
+- Watch image/revision storage is atomic, bounded, ordered, and compatible with
+  existing legacy artwork. Newer resets reject late uploads and clear media.
+- Logo taps belong to the visible provider; hidden images have no panic tap
+  overlay. Physical rendering/binding/reconnection checks remain pending.
+- See `docs/LOGOS.md` for limits, persistence, receipt, and privacy details.
+
 When working on this project, verify and build on top of these files:
 
 ### Mobile (`:app`) Target Files

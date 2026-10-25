@@ -1,6 +1,8 @@
 package com.example.wear
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -14,6 +16,12 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.example.core.sync.WearCommandProtocol
 import com.example.core.sync.SyncAppliedAck
+import com.example.core.sync.WatchFaceLogoProtocol
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.DataMap
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.util.concurrent.TimeUnit
 
 class WearSyncService : WearableListenerService() {
 
@@ -55,13 +63,7 @@ class WearSyncService : WearableListenerService() {
                 ) {
                     applyWatchFaceConfig(DataMapItem.fromDataItem(item).dataMap)
                 } else if (item.uri.path == PATH_WATCHFACE_LOGO_V1) {
-                    val dataMap = DataMapItem.fromDataItem(item).dataMap
-                    if (dataMap.getBoolean(KEY_RESET_LOGO, false)) {
-                        deleteFile(LOGO_FILENAME)
-                        requestLogoComplicationUpdate()
-                    } else {
-                        dataMap.getAsset(KEY_LOGO_ASSET)?.let(::storeLogoAsset)
-                    }
+                    applyWatchFaceLogo(DataMapItem.fromDataItem(item).dataMap)
                 }
             }
         }
@@ -203,25 +205,96 @@ class WearSyncService : WearableListenerService() {
         ComplicationUpdates.config(this)
     }
 
-    private fun storeLogoAsset(asset: Asset) {
-        Wearable.getDataClient(this).getFdForAsset(asset)
-            .addOnSuccessListener { result ->
-                runCatching {
-                    result.inputStream.use { input ->
-                        openFileOutput(LOGO_FILENAME, MODE_PRIVATE).use { output -> input.copyTo(output) }
-                    }
-                }.onSuccess {
-                    Log.d(TAG, "Stored custom watch face logo")
-                    requestLogoComplicationUpdate()
-                }.onFailure { error ->
-                    Log.e(TAG, "Failed to store custom watch face logo", error)
-                }
-            }
-            .addOnFailureListener { error -> Log.e(TAG, "Failed to read logo asset", error) }
+    internal fun applyWatchFaceLogo(
+        data: DataMap,
+        readAsset: (Asset) -> ByteArray = ::readLogoAsset,
+        acknowledge: (DataMap) -> Unit = ::publishLogoAcknowledgement
+    ): Boolean {
+        val revision = runCatching { data.getString(KEY_REVISION) }.getOrNull().orEmpty()
+        val reset = runCatching { data.getBoolean(KEY_RESET_LOGO, false) }.getOrDefault(false)
+        var digest = runCatching { data.getString("sha256") }.getOrNull().orEmpty()
+        val result = runCatching {
+            require(data.getInt(KEY_SCHEMA_VERSION, 1) == WatchFaceLogoProtocol.SCHEMA_VERSION) { "Unsupported logo schema" }
+            require(WatchFaceLogoProtocol.validRevision(revision)) { "Invalid logo revision" }
+            val timestamp = data.getLong(KEY_TIMESTAMP, 0L)
+            var bytes = if (reset) null else readAsset(requireNotNull(data.getAsset(KEY_LOGO_ASSET)) { "Logo image is missing" })
+            if (data.containsKey(KEY_SCHEMA_VERSION)) {
+                require(data.containsKey("sha256")) { "Logo checksum is missing" }
+                require(digest == bytes?.let(WatchFaceLogoProtocol::sha256).orEmpty()) { "Logo checksum did not match" }
+            } else if (bytes != null) bytes = normalizeLegacyLogo(bytes)
+            digest = bytes?.let(WatchFaceLogoProtocol::sha256).orEmpty()
+            WearLogoStore(this).apply(bytes, revision, timestamp, reset)
+            ComplicationUpdates.logo(this)
+        }
+        val receipt = DataMap().apply {
+            putInt(KEY_SCHEMA_VERSION, WatchFaceLogoProtocol.SCHEMA_VERSION)
+            putString(KEY_REVISION, revision)
+            putBoolean(KEY_RESET_LOGO, reset)
+            putString("sha256", digest)
+            putBoolean(KEY_SUCCESS, result.isSuccess)
+            putString(KEY_STATUS_MESSAGE, if (result.isSuccess) "Logo stored" else logoErrorMessage(result.exceptionOrNull()))
+            putLong(KEY_APPLIED_AT, System.currentTimeMillis())
+        }
+        acknowledge(receipt)
+        result.exceptionOrNull()?.let { Log.e(TAG, "Could not apply logo revision=$revision", it) }
+        return result.isSuccess
     }
 
-    private fun requestLogoComplicationUpdate() {
-        ComplicationUpdates.logo(this)
+    private fun logoErrorMessage(error: Throwable?): String =
+        if (generateSequence(error) { it.cause }.take(8).any { it is org.json.JSONException })
+            "Stored logo data is damaged. Reset the logo."
+        else error?.message?.lineSequence()?.firstOrNull()?.take(240) ?: "Logo could not be stored"
+
+    private fun publishLogoAcknowledgement(receipt: DataMap) {
+        val request = PutDataMapRequest.create(WatchFaceLogoProtocol.STATUS_PATH).apply { dataMap.putAll(receipt) }
+            .asPutDataRequest().setUrgent()
+        Wearable.getDataClient(this).putDataItem(request).addOnFailureListener { Log.e(TAG, "Could not acknowledge logo", it) }
+    }
+
+    private fun readLogoAsset(asset: Asset): ByteArray {
+        val task = Wearable.getDataClient(this).getFdForAsset(asset)
+        val response = try { Tasks.await(task, 10, TimeUnit.SECONDS) } catch (error: Exception) {
+            task.addOnSuccessListener { it.release() }
+            throw error
+        }
+        try {
+            return response.inputStream.use { input ->
+                requireNotNull(input) { "Logo asset could not be opened" }
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    require(output.size() + count <= 512 * 1024) { "Logo asset exceeds the supported size" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+        } finally { response.release() }
+    }
+
+    private fun normalizeLegacyLogo(bytes: ByteArray): ByteArray {
+        require(bytes.size <= 512 * 1024) { "Legacy logo is too large" }
+        val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            val width = info.size.width
+            val height = info.size.height
+            require(info.mimeType == "image/png" && width in 1..256 && height in 1..256) { "Unsupported legacy logo" }
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setOnPartialImageListener { false }
+            val longest = maxOf(width, height)
+            if (longest > WatchFaceLogoProtocol.IMAGE_SIZE) {
+                decoder.setTargetSize(
+                    maxOf(1, width * WatchFaceLogoProtocol.IMAGE_SIZE / longest),
+                    maxOf(1, height * WatchFaceLogoProtocol.IMAGE_SIZE / longest)
+                )
+            }
+        }
+        try {
+            return ByteArrayOutputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Legacy logo could not be converted" }
+                output.toByteArray()
+            }
+        } finally { bitmap.recycle() }
     }
 
     private fun applyWatchFaceConfig(dataMap: com.google.android.gms.wearable.DataMap) {

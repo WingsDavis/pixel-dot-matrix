@@ -1,6 +1,8 @@
 package com.example.core.sync
 
 import android.content.Context
+import android.net.Uri
+import com.example.core.media.LogoTransform
 import android.util.Log
 import com.example.core.timer.PomodoroEngine
 import com.example.core.timer.PomodoroState
@@ -70,6 +72,8 @@ class WearableSyncManager(
     )
     val watchFaceEditorConfig: StateFlow<WatchFaceConfig> = watchFaceTransactions.editorConfig
     val watchFaceSyncStatus: StateFlow<WatchFaceSyncStatus> = watchFaceTransactions.status
+    private val logoSync = WatchFaceLogoSync(context, scope, ::publishLogoOperation)
+    val watchFaceLogoState = logoSync.state
     private val _connectedNodeCount = MutableStateFlow(0)
     val connectedNodeCount: StateFlow<Int> = _connectedNodeCount.asStateFlow()
 
@@ -113,8 +117,15 @@ class WearableSyncManager(
         scope.launch(Dispatchers.IO) {
             while (isActive) {
                 _connectedNodeCount.value = runCatching { nodeClient.connectedNodes.await().size }.getOrDefault(0)
+                if (_connectedNodeCount.value > 0) runCatching { logoSync.retryPending() }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    Log.e(TAG, "Could not retry logo sync", it)
+                }
                 delay(OUTBOX_RETRY_INTERVAL_MS)
-                syncOutbox.flush()
+                runCatching { syncOutbox.flush() }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    Log.e(TAG, "Could not retry sync operations", it)
+                }
             }
         }
     }
@@ -316,21 +327,23 @@ class WearableSyncManager(
         Log.d(TAG, "Pushed watch face config revision=${config.localRevision}; awaiting Wear acknowledgement.")
     }
 
-    fun pushWatchFaceLogo(pngBytes: ByteArray) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val request = PutDataMapRequest.create(PATH_WATCHFACE_LOGO_V1).apply {
-                    dataMap.putAsset(KEY_LOGO_ASSET, Asset.createFromBytes(pngBytes))
-                    dataMap.putString(KEY_REVISION, UUID.randomUUID().toString())
-                    dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
-                }.asPutDataRequest().setUrgent()
+    fun selectWatchFaceLogo(uri: Uri) = logoSync.select(uri)
+    fun editWatchFaceLogo(update: (LogoTransform) -> LogoTransform) = logoSync.edit(update)
+    fun applyWatchFaceLogo() = logoSync.apply()
+    fun retryWatchFaceLogo() = logoSync.retry()
 
-                dataClient.putDataItem(request).await()
-                Log.d(TAG, "Pushed custom watch face logo asset (${pngBytes.size} bytes).")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to push custom watch face logo", e)
-            }
-        }
+    private suspend fun publishLogoOperation(operation: LogoOperation) {
+        val request = PutDataMapRequest.create(WatchFaceLogoProtocol.PATH).apply {
+            dataMap.putInt(KEY_SCHEMA_VERSION, WatchFaceLogoProtocol.SCHEMA_VERSION)
+            dataMap.putString(KEY_REVISION, operation.id)
+            dataMap.putLong(KEY_TIMESTAMP, operation.timestamp)
+            dataMap.putBoolean(KEY_RESET_LOGO, operation.reset)
+            operation.png?.let { dataMap.putAsset(KEY_LOGO_ASSET, Asset.createFromBytes(it)) }
+            dataMap.putString("sha256", operation.digest)
+            dataMap.putInt("attempt", operation.attempt)
+            dataMap.putLong("updated_at", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        dataClient.putDataItem(request).await()
     }
 
     /**
@@ -338,6 +351,10 @@ class WearableSyncManager(
      * This handles bidirectional synchronization of state.
      */
     fun handleData(path: String, dataMap: DataMap): Boolean {
+        if (path == WatchFaceLogoProtocol.STATUS_PATH) {
+            logoSync.acknowledge(dataMap)
+            return false
+        }
         if (path == PATH_POMODORO_STATE) {
             if (dataMap.getString(KEY_SOURCE_DEVICE) == SOURCE_PHONE) return false
             val state = PomodoroState.valueOf(dataMap.getString(KEY_STATE) ?: return false)
@@ -444,18 +461,11 @@ class WearableSyncManager(
     }
 
     fun resetWatchFaceLogo() {
-        scope.launch(Dispatchers.IO) {
-            runCatching { resetWatchFaceLogoAndAwait() }.onFailure { Log.e(TAG, "Could not queue logo reset", it) }
-        }
+        logoSync.reset()
     }
 
     suspend fun resetWatchFaceLogoAndAwait() {
-        val request = PutDataMapRequest.create(PATH_WATCHFACE_LOGO_V1).apply {
-            dataMap.putBoolean(KEY_RESET_LOGO, true)
-            dataMap.putString(KEY_REVISION, UUID.randomUUID().toString())
-            dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
-        }.asPutDataRequest().setUrgent()
-        dataClient.putDataItem(request).await()
+        logoSync.resetAndQueue()
     }
 
     fun clearWatchFacePreferences(): Job {
@@ -494,7 +504,8 @@ class WearableSyncManager(
 
     fun resetWatchFaceConfig(): Job {
         val defaults = WatchFaceConfig()
-        return watchFaceTransactions.apply(previewConfig = defaults, beforePublish = ::resetWatchFaceLogoAndAwait) { defaults }
+        val reset = logoSync.reset()
+        return watchFaceTransactions.apply(previewConfig = defaults, beforePublish = { reset.await() }) { defaults }
     }
 
     private fun replayStoredWatchFaceConfig() {

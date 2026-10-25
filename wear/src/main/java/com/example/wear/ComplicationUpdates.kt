@@ -41,7 +41,7 @@ internal object ComplicationUpdates {
     fun logo(context: Context) {
         val file = File(context.filesDir, WearSyncService.LOGO_FILENAME)
         val visible = context.getSharedPreferences("watchface_config_prefs", Context.MODE_PRIVATE).getBoolean("show_panic_logo", true)
-        requestChanged(context, "logo", listOf(visible, file.exists(), file.length(), file.lastModified()),
+        requestChanged(context, "logo", listOf(visible, WearLogoStore(context).revision(), file.exists(), file.length(), file.lastModified()),
             listOf(LogoComplicationService::class.java))
     }
 

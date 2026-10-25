@@ -133,7 +133,7 @@ class WatchFacePreviewTest {
     }
 
     @Test
-    fun logoVisibilityBitmapAndEachTransformAffectPixels() {
+    fun logoVisibilityAndRenderedBitmapAffectPixels() {
         showPreview()
         val initial = PreviewConfig()
         val hidden = capture("logo-hidden", initial)
@@ -145,12 +145,6 @@ class WatchFacePreviewTest {
         assertChanged("custom logo bitmap", builtIn, custom, logoRegion)
         val replaced = capture("logo-replaced", logoConfig.copy(logoBitmap = solidLogo(Color.Magenta)))
         assertChanged("replacement logo pixels", custom, replaced, logoRegion)
-        val scaled = capture("logo-scaled", logoConfig.copy(logoScale = 1.4f))
-        assertChanged("logo scale", custom, scaled, logoRegion)
-        val movedX = capture("logo-offset-x", logoConfig.copy(logoOffsetX = 0.5f))
-        assertChanged("logo horizontal offset", custom, movedX, logoRegion)
-        val movedY = capture("logo-offset-y", logoConfig.copy(logoOffsetY = 0.5f))
-        assertChanged("logo vertical offset", custom, movedY, logoRegion)
         val customHidden = capture("logo-custom-hidden", logoConfig.copy(showPanicLogo = false))
         assertArrayEquals("Hidden bitmap must not leak into preview", hidden.pixels(logoRegion), customHidden.pixels(logoRegion))
     }
@@ -169,10 +163,7 @@ class WatchFacePreviewTest {
             bottomRightSlotMode = "daily_target",
             dailyTargetText = "999 / 999 min",
             showPanicLogo = true,
-            logoBitmap = solidLogo(Color.Cyan),
-            logoScale = 1.5f,
-            logoOffsetX = 0.5f,
-            logoOffsetY = -0.5f
+            logoBitmap = solidLogo(Color.Cyan)
         )
         val variants = listOf(
             "ambient-custom-logo-text-goal" to loud,
@@ -215,9 +206,6 @@ class WatchFacePreviewTest {
                     bottomRightSlotMode = config.bottomRightSlotMode,
                     showPanicLogo = config.showPanicLogo,
                     logoBitmap = config.logoBitmap,
-                    logoScale = config.logoScale,
-                    logoOffsetX = config.logoOffsetX,
-                    logoOffsetY = config.logoOffsetY,
                     ambient = config.ambient,
                     dailyTargetText = config.dailyTargetText,
                     modifier = Modifier.size(286.dp).background(Color.Black).testTag("watch-face-preview")
@@ -292,9 +280,6 @@ class WatchFacePreviewTest {
         val bottomRightSlotMode: String = "hidden",
         val showPanicLogo: Boolean = false,
         val logoBitmap: ImageBitmap? = null,
-        val logoScale: Float = 1f,
-        val logoOffsetX: Float = 0f,
-        val logoOffsetY: Float = 0f,
         val ambient: Boolean = false,
         val dailyTargetText: String = ""
     )
